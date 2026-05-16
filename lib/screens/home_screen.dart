@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../app_state.dart';
 import '../services/lastfm_service.dart';
+import '../services/image_service.dart';
+import '../services/update_service.dart';
 import 'setup_screen.dart';
 
 // ─── Constantes ────────────────────────────────────────
@@ -16,6 +19,15 @@ const _kPeriods = [
   ('6month',  '6 mois'),
   ('12month', 'Année'),
   ('overall', 'Tout'),
+];
+
+const _kGreetingOptions = [
+  'Bonjour',
+  'Bonsoir',
+  'Salut',
+  'Hey',
+  'Coucou',
+  'Bienvenue',
 ];
 
 // ═══════════════════════════════════════════════════════
@@ -115,12 +127,21 @@ class _DashboardPageState extends State<_DashboardPage> {
   String? _error;
   Timer? _npTimer;
 
+  // ── Personnalisation ──────────────────────────────────
+  String _greeting        = 'Bonjour';
+  bool   _showNowPlay     = true;
+  bool   _showStats       = true;
+  bool   _showArtists     = true;
+  bool   _showTracks      = true;
+  String _artistPeriod    = 'overall';
+  String _trackPeriod     = '7day';
+
   @override
   void initState() {
     super.initState();
-    _load();
-    // Rafraîchit le "En cours" toutes les 30 secondes
-    _npTimer = Timer.periodic(const Duration(seconds: 30), (_) => _refreshNowPlaying());
+    _loadPrefs().then((_) => _load());
+    _npTimer = Timer.periodic(
+        const Duration(seconds: 30), (_) => _refreshNowPlaying());
   }
 
   @override
@@ -129,13 +150,27 @@ class _DashboardPageState extends State<_DashboardPage> {
     super.dispose();
   }
 
+  Future<void> _loadPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _greeting     = prefs.getString('ls_greeting')          ?? 'Bonjour';
+      _showNowPlay  = prefs.getBool('ls_show_nowplay')        ?? true;
+      _showStats    = prefs.getBool('ls_show_stats')          ?? true;
+      _showArtists  = prefs.getBool('ls_show_artists')        ?? true;
+      _showTracks   = prefs.getBool('ls_show_tracks')         ?? true;
+      _artistPeriod = prefs.getString('ls_dash_artist_period') ?? 'overall';
+      _trackPeriod  = prefs.getString('ls_dash_track_period')  ?? '7day';
+    });
+  }
+
   Future<void> _load() async {
     setState(() { _loading = true; _error = null; });
     try {
       final results = await Future.wait([
         widget.service.getUserInfo(),
-        widget.service.getTopArtists(period: 'overall', limit: 5),
-        widget.service.getTopTracks(period: '7day', limit: 5),
+        widget.service.getTopArtists(period: _artistPeriod, limit: 5),
+        widget.service.getTopTracks(period: _trackPeriod, limit: 5),
         widget.service.getNowPlaying(),
       ]);
       setState(() {
@@ -159,6 +194,9 @@ class _DashboardPageState extends State<_DashboardPage> {
       if (mounted) setState(() => _nowPlaying = np);
     } catch (_) {}
   }
+
+  String _periodLabel(String p) =>
+      _kPeriods.firstWhere((x) => x.$1 == p, orElse: () => (p, p)).$2;
 
   @override
   Widget build(BuildContext context) {
@@ -184,7 +222,7 @@ class _DashboardPageState extends State<_DashboardPage> {
         slivers: [
           // ── AppBar profil ──
           SliverAppBar(
-            expandedHeight: 190,
+            expandedHeight: 200,
             pinned: true,
             flexibleSpace: FlexibleSpaceBar(
               background: Container(
@@ -197,38 +235,68 @@ class _DashboardPageState extends State<_DashboardPage> {
                 ),
                 child: SafeArea(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                    child: Row(
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        CircleAvatar(
-                          radius: 40,
-                          backgroundColor: scheme.primary.withValues(alpha: 0.2),
-                          backgroundImage: avatarUrl.isNotEmpty
-                              ? NetworkImage(avatarUrl) : null,
-                          child: avatarUrl.isEmpty
-                              ? Icon(Icons.person_rounded, size: 40,
-                                  color: scheme.onPrimaryContainer)
-                              : null,
+                        // ── Salutation personnalisée ──
+                        Text(
+                          '$_greeting, $name 👋',
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(
+                                color: scheme.primary,
+                                fontWeight: FontWeight.w700,
+                              ),
                         ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(name,
-                                style: Theme.of(context).textTheme.titleLarge
-                                    ?.copyWith(fontWeight: FontWeight.w800)),
-                              if (realName.isNotEmpty)
-                                Text(realName,
-                                  style: Theme.of(context).textTheme.bodyMedium
-                                      ?.copyWith(color: scheme.onSurfaceVariant)),
-                              if (country.isNotEmpty && country != 'None')
-                                Text(country,
-                                  style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(color: scheme.onSurfaceVariant)),
-                            ],
-                          ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 36,
+                              backgroundColor:
+                                  scheme.primary.withValues(alpha: 0.2),
+                              backgroundImage: avatarUrl.isNotEmpty
+                                  ? NetworkImage(avatarUrl)
+                                  : null,
+                              child: avatarUrl.isEmpty
+                                  ? Icon(Icons.person_rounded,
+                                      size: 36,
+                                      color: scheme.onPrimaryContainer)
+                                  : null,
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(name,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleLarge
+                                          ?.copyWith(
+                                              fontWeight: FontWeight.w800)),
+                                  if (realName.isNotEmpty)
+                                    Text(realName,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodyMedium
+                                            ?.copyWith(
+                                                color:
+                                                    scheme.onSurfaceVariant)),
+                                  if (country.isNotEmpty &&
+                                      country != 'None')
+                                    Text(country,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(
+                                                color:
+                                                    scheme.onSurfaceVariant)),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -236,7 +304,8 @@ class _DashboardPageState extends State<_DashboardPage> {
                 ),
               ),
               title: Text('@$name',
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                  style: const TextStyle(
+                      fontSize: 14, fontWeight: FontWeight.w600)),
             ),
           ),
 
@@ -246,46 +315,160 @@ class _DashboardPageState extends State<_DashboardPage> {
               delegate: SliverChildListDelegate([
 
                 // ── En cours de lecture ──
-                if (_nowPlaying != null) ...[
+                if (_showNowPlay && _nowPlaying != null) ...[
                   _NowPlayingCard(track: _nowPlaying!),
                   const SizedBox(height: 16),
                 ],
 
                 // ── Stat scrobbles ──
-                _StatCard(
-                  icon: Icons.headphones_rounded,
-                  value: _formatNumber(int.tryParse(scrobbles) ?? 0),
-                  label: 'Scrobbles au total',
-                  sub: registered.isNotEmpty ? 'Membre depuis $registered' : null,
-                ),
-                const SizedBox(height: 20),
+                if (_showStats) ...[
+                  _StatCard(
+                    icon: Icons.headphones_rounded,
+                    value: _formatNumber(int.tryParse(scrobbles) ?? 0),
+                    label: 'Scrobbles au total',
+                    sub: registered.isNotEmpty
+                        ? 'Membre depuis $registered'
+                        : null,
+                  ),
+                  const SizedBox(height: 20),
+                ],
 
-                // ── Top Artistes (all time) ──
-                _SectionHeader(title: 'Top Artistes', icon: Icons.mic_rounded),
-                const SizedBox(height: 8),
-                ..._topArtists.asMap().entries.map((e) => _ItemTile(
-                  name:     (e.value['name'] ?? '').toString(),
-                  sub:      '${_formatNumber(int.tryParse((e.value['playcount'] ?? '0').toString()) ?? 0)} écoutes',
-                  imageUrl: _extractImage(e.value['image']),
-                  rank:     '${e.key + 1}',
-                )),
-                const SizedBox(height: 20),
+                // ── Top Artistes ──
+                if (_showArtists) ...[
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _SectionHeader(
+                            title: 'Top Artistes',
+                            icon: Icons.mic_rounded),
+                      ),
+                      _PeriodBadge(
+                        label: _periodLabel(_artistPeriod),
+                        onTap: () => _pickPeriod(
+                          title: 'Période — Artistes',
+                          current: _artistPeriod,
+                          prefKey: 'ls_dash_artist_period',
+                          onChanged: (p) {
+                            setState(() => _artistPeriod = p);
+                            _load();
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  ..._topArtists.asMap().entries.map((e) {
+                    final name = (e.value['name'] ?? '').toString();
+                    final rawUrl = _extractImage(e.value['image']);
+                    return _ItemTile(
+                      name: name,
+                      sub: '${_formatNumber(int.tryParse((e.value['playcount'] ?? '0').toString()) ?? 0)} écoutes',
+                      imageUrl: rawUrl,
+                      imageFuture: ImageService.resolveArtist(name,
+                          lastfmUrl: rawUrl.isNotEmpty ? rawUrl : null),
+                      rank: '${e.key + 1}',
+                    );
+                  }),
+                  const SizedBox(height: 20),
+                ],
 
-                // ── Top Titres (semaine) ──
-                _SectionHeader(title: 'Top Titres — Semaine', icon: Icons.music_note_rounded),
-                const SizedBox(height: 8),
-                ..._topTracks.asMap().entries.map((e) => _ItemTile(
-                  name:     (e.value['name'] ?? '').toString(),
-                  sub:      (e.value['artist']?['name'] ?? '').toString(),
-                  imageUrl: _extractImage(e.value['image']),
-                  rank:     '${e.key + 1}',
-                  plays:    _formatNumber(int.tryParse((e.value['playcount'] ?? '0').toString()) ?? 0),
-                )),
-                const SizedBox(height: 20),
+                // ── Top Titres ──
+                if (_showTracks) ...[
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _SectionHeader(
+                            title: 'Top Titres',
+                            icon: Icons.music_note_rounded),
+                      ),
+                      _PeriodBadge(
+                        label: _periodLabel(_trackPeriod),
+                        onTap: () => _pickPeriod(
+                          title: 'Période — Titres',
+                          current: _trackPeriod,
+                          prefKey: 'ls_dash_track_period',
+                          onChanged: (p) {
+                            setState(() => _trackPeriod = p);
+                            _load();
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  ..._topTracks.asMap().entries.map((e) {
+                    final tname  = (e.value['name'] ?? '').toString();
+                    final artist = (e.value['artist']?['name'] ?? '').toString();
+                    final rawUrl = _extractImage(e.value['image']);
+                    return _ItemTile(
+                      name: tname,
+                      sub: artist,
+                      imageUrl: rawUrl,
+                      imageFuture: ImageService.resolveTrack(tname, artist,
+                          lastfmUrl: rawUrl.isNotEmpty ? rawUrl : null),
+                      rank: '${e.key + 1}',
+                      plays: _formatNumber(int.tryParse(
+                              (e.value['playcount'] ?? '0').toString()) ??
+                          0),
+                    );
+                  }),
+                  const SizedBox(height: 20),
+                ],
+
               ]),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // ── Sélecteur de période ─────────────────────────────
+  void _pickPeriod({
+    required String title,
+    required String current,
+    required String prefKey,
+    required void Function(String) onChanged,
+  }) {
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                    color: Theme.of(ctx).colorScheme.onSurfaceVariant
+                        .withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 12),
+            Text(title,
+                style: Theme.of(ctx)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            ..._kPeriods.map((p) => ListTile(
+                  title: Text(p.$2),
+                  trailing: current == p.$1
+                      ? Icon(Icons.check_rounded,
+                          color: Theme.of(ctx).colorScheme.primary)
+                      : null,
+                  onTap: () async {
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.setString(prefKey, p.$1);
+                    onChanged(p.$1);
+                    if (ctx.mounted) Navigator.pop(ctx);
+                  },
+                )),
+            const SizedBox(height: 8),
+          ],
+        ),
       ),
     );
   }
@@ -300,11 +483,11 @@ class _NowPlayingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme  = Theme.of(context).colorScheme;
-    final text    = Theme.of(context).textTheme;
-    final title   = (track['name']             ?? '').toString();
-    final artist  = (track['artist']?['#text'] ?? '').toString();
-    final imgUrl  = _extractImage(track['image']);
+    final scheme = Theme.of(context).colorScheme;
+    final text   = Theme.of(context).textTheme;
+    final title  = (track['name']             ?? '').toString();
+    final artist = (track['artist']?['#text'] ?? '').toString();
+    final rawUrl = _extractImage(track['image']);
 
     return Card(
       elevation: 0,
@@ -314,18 +497,12 @@ class _NowPlayingCard extends StatelessWidget {
         padding: const EdgeInsets.all(14),
         child: Row(
           children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: Image.network(
-                imgUrl.isNotEmpty ? imgUrl : _kDefaultImg,
-                width: 56, height: 56, fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => Container(
-                  width: 56, height: 56,
-                  color: scheme.surfaceContainerHighest,
-                  child: Icon(Icons.music_note_rounded,
-                      color: scheme.onSurfaceVariant),
-                ),
-              ),
+            _SmartImage(
+              size: 56,
+              borderRadius: 10,
+              initialUrl: rawUrl,
+              resolver: () => ImageService.resolveTrack(title, artist,
+                  lastfmUrl: rawUrl.isNotEmpty ? rawUrl : null),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -342,22 +519,24 @@ class _NowPlayingCard extends StatelessWidget {
                     ),
                     const SizedBox(width: 6),
                     Text('EN COURS',
-                      style: text.labelSmall?.copyWith(
-                        color: scheme.secondary,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 1.2,
-                      )),
+                        style: text.labelSmall?.copyWith(
+                          color: scheme.secondary,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.2,
+                        )),
                   ]),
                   const SizedBox(height: 2),
                   Text(title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w700)),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: text.bodyMedium
+                          ?.copyWith(fontWeight: FontWeight.w700)),
                   Text(artist,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: text.bodySmall?.copyWith(
-                        color: scheme.onSecondaryContainer.withValues(alpha: 0.75))),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: text.bodySmall?.copyWith(
+                          color: scheme.onSecondaryContainer
+                              .withValues(alpha: 0.75))),
                 ],
               ),
             ),
@@ -369,7 +548,7 @@ class _NowPlayingCard extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════
-// CLASSEMENTS (Artists + Albums + Tracks fusionnés)
+// CLASSEMENTS (Artists + Albums + Tracks)
 // ═══════════════════════════════════════════════════════
 class _RankingsPage extends StatefulWidget {
   final LastFmService service;
@@ -403,20 +582,20 @@ class _RankingsPageState extends State<_RankingsPage>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Titre ──
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 4),
               child: Text('Classements',
-                style: Theme.of(context).textTheme.headlineSmall
-                    ?.copyWith(fontWeight: FontWeight.w800)),
+                  style: Theme.of(context)
+                      .textTheme
+                      .headlineSmall
+                      ?.copyWith(fontWeight: FontWeight.w800)),
             ),
-
-            // ── Période ──
             SizedBox(
               height: 44,
               child: ListView(
                 scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
                 children: _kPeriods.map((p) {
                   final sel = p.$1 == _period;
                   return Padding(
@@ -432,8 +611,6 @@ class _RankingsPageState extends State<_RankingsPage>
                 }).toList(),
               ),
             ),
-
-            // ── Tabs ──
             TabBar(
               controller: _tabs,
               tabs: const [
@@ -442,15 +619,22 @@ class _RankingsPageState extends State<_RankingsPage>
                 Tab(text: 'Titres'),
               ],
             ),
-
-            // ── Contenu ──
             Expanded(
               child: TabBarView(
                 controller: _tabs,
                 children: [
-                  _TopListBody(service: widget.service, type: 'artists', period: _period),
-                  _TopListBody(service: widget.service, type: 'albums',  period: _period),
-                  _TopListBody(service: widget.service, type: 'tracks',  period: _period),
+                  _TopListBody(
+                      service: widget.service,
+                      type: 'artists',
+                      period: _period),
+                  _TopListBody(
+                      service: widget.service,
+                      type: 'albums',
+                      period: _period),
+                  _TopListBody(
+                      service: widget.service,
+                      type: 'tracks',
+                      period: _period),
                 ],
               ),
             ),
@@ -465,7 +649,8 @@ class _TopListBody extends StatefulWidget {
   final LastFmService service;
   final String type;
   final String period;
-  const _TopListBody({required this.service, required this.type, required this.period});
+  const _TopListBody(
+      {required this.service, required this.type, required this.period});
 
   @override
   State<_TopListBody> createState() => _TopListBodyState();
@@ -497,7 +682,13 @@ class _TopListBodyState extends State<_TopListBody>
 
   Future<void> _load({bool reset = false}) async {
     if (reset) {
-      setState(() { _loading = true; _error = null; _page = 1; _exhausted = false; _items = []; });
+      setState(() {
+        _loading    = true;
+        _error      = null;
+        _page       = 1;
+        _exhausted  = false;
+        _items      = [];
+      });
     } else {
       if (_loadingMore || _exhausted) return;
       setState(() => _loadingMore = true);
@@ -507,13 +698,16 @@ class _TopListBodyState extends State<_TopListBody>
       List<dynamic> fresh;
       switch (widget.type) {
         case 'artists':
-          fresh = await widget.service.getTopArtists(period: widget.period, limit: 50, page: _page);
+          fresh = await widget.service
+              .getTopArtists(period: widget.period, limit: 50, page: _page);
           break;
         case 'albums':
-          fresh = await widget.service.getTopAlbums(period: widget.period, limit: 50, page: _page);
+          fresh = await widget.service
+              .getTopAlbums(period: widget.period, limit: 50, page: _page);
           break;
         default:
-          fresh = await widget.service.getTopTracks(period: widget.period, limit: 50, page: _page);
+          fresh = await widget.service
+              .getTopTracks(period: widget.period, limit: 50, page: _page);
       }
       if (mounted) {
         setState(() {
@@ -544,13 +738,15 @@ class _TopListBodyState extends State<_TopListBody>
       return _ErrorView(message: _error!, onRetry: () => _load(reset: true));
     }
     if (_items.isEmpty) {
-      return Center(child: Text('Aucun résultat',
-          style: TextStyle(color: scheme.onSurfaceVariant)));
+      return Center(
+          child: Text('Aucun résultat',
+              style: TextStyle(color: scheme.onSurfaceVariant)));
     }
 
     return NotificationListener<ScrollNotification>(
       onNotification: (n) {
-        if (!_exhausted && !_loadingMore &&
+        if (!_exhausted &&
+            !_loadingMore &&
             n.metrics.pixels >= n.metrics.maxScrollExtent - 200) {
           _page++;
           _load();
@@ -562,23 +758,40 @@ class _TopListBodyState extends State<_TopListBody>
         itemBuilder: (_, i) {
           if (i == _items.length) {
             return const Padding(
-              padding: EdgeInsets.all(16),
-              child: Center(child: CircularProgressIndicator()),
-            );
+                padding: EdgeInsets.all(16),
+                child: Center(child: CircularProgressIndicator()));
           }
-          final item  = _items[i];
-          final name  = (item['name'] ?? '').toString();
-          final plays = _formatNumber(
+          final item   = _items[i];
+          final name   = (item['name'] ?? '').toString();
+          final plays  = _formatNumber(
               int.tryParse((item['playcount'] ?? '0').toString()) ?? 0);
-          final sub   = widget.type != 'artists'
-              ? (item['artist']?['name'] ?? '').toString()
-              : '$plays écoutes';
+          final artist = (item['artist']?['name'] ?? '').toString();
+          final rawUrl = _extractImage(item['image']);
+
+          Future<String> imgFuture;
+          switch (widget.type) {
+            case 'artists':
+              imgFuture = ImageService.resolveArtist(name,
+                  lastfmUrl: rawUrl.isNotEmpty ? rawUrl : null);
+              break;
+            case 'albums':
+              imgFuture = ImageService.resolveAlbum(name, artist,
+                  lastfmUrl: rawUrl.isNotEmpty ? rawUrl : null);
+              break;
+            default:
+              imgFuture = ImageService.resolveTrack(name, artist,
+                  lastfmUrl: rawUrl.isNotEmpty ? rawUrl : null);
+          }
+
           return _ItemTile(
-            name:     name,
-            sub:      sub,
-            imageUrl: _extractImage(item['image']),
-            rank:     '${i + 1}',
-            plays:    widget.type != 'artists' ? plays : null,
+            name:        name,
+            sub:         widget.type != 'artists'
+                ? '$artist · $plays écoutes'
+                : '$plays écoutes',
+            imageUrl:    rawUrl,
+            imageFuture: imgFuture,
+            rank:        '${i + 1}',
+            plays:       widget.type != 'artists' ? plays : null,
           );
         },
       ),
@@ -601,7 +814,7 @@ class _ChartsPageState extends State<_ChartsPage>
     with AutomaticKeepAliveClientMixin {
   Map<String, int>? _monthly;
   List<dynamic>     _topArtists = [];
-  bool _loading  = true;
+  bool _loading   = true;
   String? _error;
   bool _gemsLoading = false;
   List<_GemEntry> _gems = [];
@@ -635,7 +848,6 @@ class _ChartsPageState extends State<_ChartsPage>
     }
   }
 
-  /// Calcule le score Mainstream vs Pépites
   Future<void> _computeGems() async {
     if (_topArtists.isEmpty) return;
     setState(() { _gemsLoading = true; _gems = []; });
@@ -646,11 +858,10 @@ class _ChartsPageState extends State<_ChartsPage>
 
     final entries = <_GemEntry>[];
     for (var i = 0; i < artists.length; i++) {
-      final count = listeners[i] ?? 0;
       entries.add(_GemEntry(
         name:      (artists[i]['name'] ?? '').toString(),
         plays:     int.tryParse((artists[i]['playcount'] ?? '0').toString()) ?? 0,
-        listeners: count,
+        listeners: listeners[i] ?? 0,
       ));
     }
     entries.sort((a, b) => a.listeners.compareTo(b.listeners));
@@ -674,19 +885,20 @@ class _ChartsPageState extends State<_ChartsPage>
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // ── Titre ──
           Text('Graphiques',
-            style: text.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
+              style: text.headlineSmall
+                  ?.copyWith(fontWeight: FontWeight.w800)),
           const SizedBox(height: 20),
 
-          // ── Scrobbles par mois ──
-          _SectionHeader(title: 'Scrobbles — 12 derniers mois',
+          _SectionHeader(
+              title: 'Scrobbles — 12 derniers mois',
               icon: Icons.calendar_month_rounded),
           const SizedBox(height: 16),
           Card(
             elevation: 0,
             color: scheme.surfaceContainerHighest,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
               child: Column(children: [
@@ -696,7 +908,7 @@ class _ChartsPageState extends State<_ChartsPage>
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: monthly.entries.map((e) {
                       final ratio = maxVal > 0 ? e.value / maxVal : 0.0;
-                      final month = e.key.substring(5); // MM
+                      final month = e.key.substring(5);
                       return Expanded(
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 2),
@@ -705,10 +917,9 @@ class _ChartsPageState extends State<_ChartsPage>
                             children: [
                               if (ratio > 0)
                                 Text(_formatNumber(e.value),
-                                  style: text.labelSmall?.copyWith(
-                                    fontSize: 8,
-                                    color: scheme.onSurfaceVariant,
-                                  )),
+                                    style: text.labelSmall?.copyWith(
+                                        fontSize: 8,
+                                        color: scheme.onSurfaceVariant)),
                               const SizedBox(height: 2),
                               Flexible(
                                 fit: FlexFit.loose,
@@ -726,7 +937,8 @@ class _ChartsPageState extends State<_ChartsPage>
                               ),
                               const SizedBox(height: 4),
                               Text(month,
-                                style: text.labelSmall?.copyWith(fontSize: 9)),
+                                  style: text.labelSmall
+                                      ?.copyWith(fontSize: 9)),
                             ],
                           ),
                         ),
@@ -740,25 +952,28 @@ class _ChartsPageState extends State<_ChartsPage>
 
           const SizedBox(height: 24),
 
-          // ── Top artistes — distribution ──
-          _SectionHeader(title: 'Top artistes — distribution',
+          _SectionHeader(
+              title: 'Top artistes — distribution',
               icon: Icons.mic_rounded),
           const SizedBox(height: 12),
           if (_topArtists.isNotEmpty) ...[
             () {
               final maxPlays = _topArtists
-                  .map((a) => int.tryParse((a['playcount'] ?? '0').toString()) ?? 0)
+                  .map((a) =>
+                      int.tryParse((a['playcount'] ?? '0').toString()) ?? 0)
                   .fold(0, (a, b) => a > b ? a : b);
               return Card(
                 elevation: 0,
                 color: scheme.surfaceContainerHighest,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16)),
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Column(
                     children: _topArtists.asMap().entries.map((e) {
                       final plays = int.tryParse(
-                              (e.value['playcount'] ?? '0').toString()) ?? 0;
+                              (e.value['playcount'] ?? '0').toString()) ??
+                          0;
                       final ratio = maxPlays > 0 ? plays / maxPlays : 0.0;
                       final name  = (e.value['name'] ?? '').toString();
                       return Padding(
@@ -767,45 +982,40 @@ class _ChartsPageState extends State<_ChartsPage>
                           SizedBox(
                             width: 24,
                             child: Text('${e.key + 1}',
-                              textAlign: TextAlign.center,
-                              style: text.bodySmall?.copyWith(
-                                color: scheme.onSurfaceVariant,
-                                fontWeight: FontWeight.w700)),
+                                textAlign: TextAlign.center,
+                                style: text.bodySmall?.copyWith(
+                                    color: scheme.onSurfaceVariant,
+                                    fontWeight: FontWeight.w700)),
                           ),
                           const SizedBox(width: 8),
                           Expanded(
                             flex: 3,
                             child: Text(name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: text.bodySmall
-                                  ?.copyWith(fontWeight: FontWeight.w600)),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: text.bodySmall
+                                    ?.copyWith(fontWeight: FontWeight.w600)),
                           ),
                           const SizedBox(width: 8),
                           Expanded(
                             flex: 5,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(4),
-                                  child: LinearProgressIndicator(
-                                    value: ratio,
-                                    minHeight: 8,
-                                    backgroundColor:
-                                        scheme.primary.withValues(alpha: 0.15),
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                        scheme.primary),
-                                  ),
-                                ),
-                              ],
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: LinearProgressIndicator(
+                                value: ratio,
+                                minHeight: 8,
+                                backgroundColor:
+                                    scheme.primary.withValues(alpha: 0.15),
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                    scheme.primary),
+                              ),
                             ),
                           ),
                           const SizedBox(width: 8),
                           Text(_formatNumber(plays),
-                            style: text.bodySmall?.copyWith(
-                              color: scheme.primary,
-                              fontWeight: FontWeight.w600)),
+                              style: text.bodySmall?.copyWith(
+                                  color: scheme.primary,
+                                  fontWeight: FontWeight.w600)),
                         ]),
                       );
                     }).toList(),
@@ -817,8 +1027,8 @@ class _ChartsPageState extends State<_ChartsPage>
 
           const SizedBox(height: 24),
 
-          // ── Mainstream vs Pépites ──
-          _SectionHeader(title: 'Mainstream vs Pépites',
+          _SectionHeader(
+              title: 'Mainstream vs Pépites',
               icon: Icons.diamond_outlined),
           const SizedBox(height: 8),
           Text(
@@ -834,46 +1044,41 @@ class _ChartsPageState extends State<_ChartsPage>
               label: const Text('Calculer mon score'),
             )
           else if (_gemsLoading)
-            const Center(child: Padding(
-              padding: EdgeInsets.all(16),
-              child: CircularProgressIndicator(),
-            ))
+            const Center(
+                child: Padding(
+                    padding: EdgeInsets.all(16),
+                    child: CircularProgressIndicator()))
           else ...[
             ..._gems.asMap().entries.map((e) {
-              final gem = e.value;
+              final gem   = e.value;
               final isGem = gem.listeners < 500000;
               return Card(
                 elevation: 0,
                 color: scheme.surfaceContainerHighest,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
                 margin: const EdgeInsets.only(bottom: 6),
                 child: ListTile(
-                  leading: Text(
-                    isGem ? '💎' : '🎤',
-                    style: const TextStyle(fontSize: 24),
-                  ),
+                  leading: Text(isGem ? '💎' : '🎤',
+                      style: const TextStyle(fontSize: 24)),
                   title: Text(gem.name,
-                    style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                      style:
+                          text.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
                   subtitle: Text(
-                    '${_formatNumber(gem.listeners)} auditeurs mondiaux',
-                    style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-                  ),
-                  trailing: Text(
-                    isGem ? 'Pépite' : 'Mainstream',
-                    style: text.labelSmall?.copyWith(
-                      color: isGem ? scheme.tertiary : scheme.primary,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
+                      '${_formatNumber(gem.listeners)} auditeurs mondiaux',
+                      style: text.bodySmall
+                          ?.copyWith(color: scheme.onSurfaceVariant)),
+                  trailing: Text(isGem ? 'Pépite' : 'Mainstream',
+                      style: text.labelSmall?.copyWith(
+                          color: isGem ? scheme.tertiary : scheme.primary,
+                          fontWeight: FontWeight.w700)),
                 ),
               );
             }),
             const SizedBox(height: 8),
             Center(
               child: TextButton(
-                onPressed: _computeGems,
-                child: const Text('Recalculer'),
-              ),
+                  onPressed: _computeGems, child: const Text('Recalculer')),
             ),
           ],
 
@@ -888,7 +1093,8 @@ class _GemEntry {
   final String name;
   final int plays;
   final int listeners;
-  const _GemEntry({required this.name, required this.plays, required this.listeners});
+  const _GemEntry(
+      {required this.name, required this.plays, required this.listeners});
 }
 
 // ═══════════════════════════════════════════════════════
@@ -923,20 +1129,26 @@ class _HistoryPageState extends State<_HistoryPage>
 
   Future<void> _load({bool reset = false}) async {
     if (reset) {
-      setState(() { _loading = true; _error = null; _page = 1; _exhausted = false; _tracks = []; });
+      setState(() {
+        _loading    = true;
+        _error      = null;
+        _page       = 1;
+        _exhausted  = false;
+        _tracks     = [];
+      });
     } else {
       if (_loadingMore || _exhausted) return;
       setState(() => _loadingMore = true);
     }
 
     try {
-      final data   = await widget.service.getRecentTracks(limit: 50, page: _page);
-      final raw    = data['track'];
-      final fresh  = raw is List ? raw : (raw != null ? [raw] : <dynamic>[]);
-      final attr   = data['@attr'] as Map?;
-      final totalP = int.tryParse(attr?['totalPages']?.toString() ?? '1') ?? 1;
+      final data  = await widget.service.getRecentTracks(limit: 50, page: _page);
+      final raw   = data['track'];
+      final fresh = raw is List ? raw : (raw != null ? [raw] : <dynamic>[]);
+      final attr  = data['@attr'] as Map?;
+      final totalP =
+          int.tryParse(attr?['totalPages']?.toString() ?? '1') ?? 1;
 
-      // Extrait le "now playing" s'il est en tête
       Map<String, dynamic>? np;
       final list = <dynamic>[];
       for (final t in fresh) {
@@ -948,7 +1160,11 @@ class _HistoryPageState extends State<_HistoryPage>
       }
 
       setState(() {
-        if (reset) { _tracks = list; } else { _tracks.addAll(list); }
+        if (reset) {
+          _tracks = list;
+        } else {
+          _tracks.addAll(list);
+        }
         _nowPlaying  = np;
         _exhausted   = _page >= totalP;
         _loading     = false;
@@ -980,8 +1196,8 @@ class _HistoryPageState extends State<_HistoryPage>
                 children: [
                   Expanded(
                     child: Text('Historique',
-                      style: text.headlineSmall
-                          ?.copyWith(fontWeight: FontWeight.w800)),
+                        style: text.headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.w800)),
                   ),
                   IconButton(
                     icon: const Icon(Icons.refresh_rounded),
@@ -993,18 +1209,23 @@ class _HistoryPageState extends State<_HistoryPage>
             ),
 
             if (_loading)
-              const Expanded(child: Center(child: CircularProgressIndicator()))
+              const Expanded(
+                  child: Center(child: CircularProgressIndicator()))
             else if (_error != null)
-              Expanded(child: _ErrorView(
-                  message: _error!, onRetry: () => _load(reset: true)))
+              Expanded(
+                  child: _ErrorView(
+                      message: _error!,
+                      onRetry: () => _load(reset: true)))
             else
               Expanded(
                 child: RefreshIndicator(
                   onRefresh: () => _load(reset: true),
                   child: NotificationListener<ScrollNotification>(
                     onNotification: (n) {
-                      if (!_exhausted && !_loadingMore &&
-                          n.metrics.pixels >= n.metrics.maxScrollExtent - 300) {
+                      if (!_exhausted &&
+                          !_loadingMore &&
+                          n.metrics.pixels >=
+                              n.metrics.maxScrollExtent - 300) {
                         _page++;
                         _load();
                       }
@@ -1015,60 +1236,56 @@ class _HistoryPageState extends State<_HistoryPage>
                           _tracks.length +
                           (_loadingMore ? 1 : 0),
                       itemBuilder: (_, i) {
-                        // Now playing banner
                         if (_nowPlaying != null && i == 0) {
                           return Padding(
-                            padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+                            padding:
+                                const EdgeInsets.fromLTRB(12, 4, 12, 8),
                             child: _NowPlayingCard(track: _nowPlaying!),
                           );
                         }
-                        final idx = _nowPlaying != null ? i - 1 : i;
+                        final idx =
+                            _nowPlaying != null ? i - 1 : i;
                         if (idx == _tracks.length) {
                           return const Padding(
-                            padding: EdgeInsets.all(16),
-                            child: Center(child: CircularProgressIndicator()),
-                          );
+                              padding: EdgeInsets.all(16),
+                              child: Center(
+                                  child: CircularProgressIndicator()));
                         }
-                        final t       = _tracks[idx] as Map;
-                        final title   = (t['name']             ?? '').toString();
-                        final artist  = (t['artist']?['#text'] ?? '').toString();
-                        final album   = (t['album']?['#text']  ?? '').toString();
-                        final imgUrl  = _extractImage(t['image']);
+                        final t      = _tracks[idx] as Map;
+                        final title  = (t['name']             ?? '').toString();
+                        final artist = (t['artist']?['#text'] ?? '').toString();
+                        final album  = (t['album']?['#text']  ?? '').toString();
+                        final rawUrl = _extractImage(t['image']);
                         final dateRaw = t['date']?['#text'] ?? '';
 
                         return ListTile(
                           contentPadding: const EdgeInsets.symmetric(
                               horizontal: 16, vertical: 2),
-                          leading: ClipRRect(
-                            borderRadius: BorderRadius.circular(6),
-                            child: Image.network(
-                              imgUrl.isNotEmpty ? imgUrl : _kDefaultImg,
-                              width: 46, height: 46, fit: BoxFit.cover,
-                              errorBuilder: (_, _, _) => Container(
-                                width: 46, height: 46,
-                                color: scheme.surfaceContainerHighest,
-                                child: Icon(Icons.music_note_rounded,
-                                    color: scheme.onSurfaceVariant, size: 20),
-                              ),
-                            ),
+                          leading: _SmartImage(
+                            size: 46,
+                            borderRadius: 6,
+                            initialUrl: rawUrl,
+                            resolver: () => ImageService.resolveTrack(
+                                title, artist,
+                                lastfmUrl:
+                                    rawUrl.isNotEmpty ? rawUrl : null),
                           ),
                           title: Text(title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: text.bodyMedium
-                                ?.copyWith(fontWeight: FontWeight.w600)),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: text.bodyMedium
+                                  ?.copyWith(fontWeight: FontWeight.w600)),
                           subtitle: Text(
-                            album.isNotEmpty ? '$artist · $album' : artist,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: text.bodySmall
-                                ?.copyWith(color: scheme.onSurfaceVariant),
-                          ),
-                          trailing: Text(
-                            _formatDate(dateRaw),
-                            style: text.labelSmall
-                                ?.copyWith(color: scheme.onSurfaceVariant),
-                          ),
+                              album.isNotEmpty
+                                  ? '$artist · $album'
+                                  : artist,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: text.bodySmall?.copyWith(
+                                  color: scheme.onSurfaceVariant)),
+                          trailing: Text(_formatDate(dateRaw),
+                              style: text.labelSmall?.copyWith(
+                                  color: scheme.onSurfaceVariant)),
                         );
                       },
                     ),
@@ -1086,7 +1303,6 @@ class _HistoryPageState extends State<_HistoryPage>
 // PARAMÈTRES
 // ═══════════════════════════════════════════════════════
 
-// Palettes accent — synchronisées avec le site web
 const _kAccentOptions = [
   (Color(0xFF7C3AED), 'purple', 'Violet'),
   (Color(0xFF1D4ED8), 'blue',   'Bleu'),
@@ -1121,52 +1337,163 @@ class _SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<_SettingsPage> {
+  // Apparence
   String _theme      = 'system';
   String _accent     = 'purple';
   int    _startupTab = 0;
   String _period     = 'overall';
 
+  // Dashboard perso
+  String _greeting       = 'Bonjour';
+  bool   _showNowPlay    = true;
+  bool   _showStats      = true;
+  bool   _showArtists    = true;
+  bool   _showTracks     = true;
+  String _artistPeriod   = 'overall';
+  String _trackPeriod    = '7day';
+
+  // Mises à jour
+  bool        _autoUpdate   = true;
+  UpdateInfo? _updateInfo;
+  bool        _checkingUpdate = false;
+  String?     _updateError;
+
   @override
   void initState() {
     super.initState();
-    _loadPrefs();
+    _loadPrefs().then((_) => _maybeCheckUpdate());
   }
 
   Future<void> _loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
     setState(() {
-      _theme      = prefs.getString('ls_theme')       ?? 'system';
-      _accent     = prefs.getString('ls_accent')      ?? 'purple';
-      _startupTab = prefs.getInt('ls_startup_tab')    ?? 0;
-      _period     = prefs.getString('ls_default_period') ?? 'overall';
+      _theme        = prefs.getString('ls_theme')              ?? 'system';
+      _accent       = prefs.getString('ls_accent')             ?? 'purple';
+      _startupTab   = prefs.getInt('ls_startup_tab')           ?? 0;
+      _period       = prefs.getString('ls_default_period')     ?? 'overall';
+      _greeting     = prefs.getString('ls_greeting')           ?? 'Bonjour';
+      _showNowPlay  = prefs.getBool('ls_show_nowplay')         ?? true;
+      _showStats    = prefs.getBool('ls_show_stats')           ?? true;
+      _showArtists  = prefs.getBool('ls_show_artists')         ?? true;
+      _showTracks   = prefs.getBool('ls_show_tracks')          ?? true;
+      _artistPeriod = prefs.getString('ls_dash_artist_period') ?? 'overall';
+      _trackPeriod  = prefs.getString('ls_dash_track_period')  ?? '7day';
+      _autoUpdate   = prefs.getBool('ls_auto_update_check')    ?? true;
     });
   }
 
-  Future<void> _setTheme(String value) async {
+  Future<void> _maybeCheckUpdate() async {
+    if (!_autoUpdate) return;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('ls_theme', value);
+    final lastCheck = prefs.getInt('ls_last_update_check') ?? 0;
+    final now       = DateTime.now().millisecondsSinceEpoch;
+    // Vérifie 1× par jour
+    if (now - lastCheck < const Duration(days: 1).inMilliseconds) return;
+    await _checkUpdate(auto: true);
+  }
+
+  Future<void> _checkUpdate({bool auto = false}) async {
+    if (!mounted) return;
+    setState(() { _checkingUpdate = true; _updateError = null; });
+    try {
+      final info = await UpdateService.checkForUpdate();
+      if (!mounted) return;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(
+          'ls_last_update_check', DateTime.now().millisecondsSinceEpoch);
+      setState(() {
+        _updateInfo    = info;
+        _checkingUpdate = false;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _updateError   = 'Vérification impossible.';
+          _checkingUpdate = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _setPref<T>(String key, T value) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (value is bool)   await prefs.setBool(key, value);
+    if (value is String) await prefs.setString(key, value);
+    if (value is int)    await prefs.setInt(key, value);
+  }
+
+  Future<void> _setTheme(String value) async {
+    await _setPref('ls_theme', value);
     setState(() => _theme = value);
     themeModeNotifier.value = themeFromString(value);
   }
 
   Future<void> _setAccent(String key, Color color) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('ls_accent', key);
+    await _setPref('ls_accent', key);
     setState(() => _accent = key);
     accentNotifier.value = color;
   }
 
   Future<void> _setStartupTab(int idx) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('ls_startup_tab', idx);
+    await _setPref('ls_startup_tab', idx);
     setState(() => _startupTab = idx);
   }
 
-  Future<void> _setPeriod(String p) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('ls_default_period', p);
+  Future<void> _setDefaultPeriod(String p) async {
+    await _setPref('ls_default_period', p);
     setState(() => _period = p);
+  }
+
+  // ── Dialogue salutation personnalisée ──
+  void _pickGreeting() {
+    final ctrl = TextEditingController(text: _greeting);
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Salutation'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _kGreetingOptions.map((g) => ActionChip(
+                label: Text(g),
+                onPressed: () {
+                  ctrl.text = g;
+                  (ctx as Element).markNeedsBuild();
+                },
+              )).toList(),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              decoration: const InputDecoration(
+                labelText: 'Ou saisir librement',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Annuler')),
+          FilledButton(
+            onPressed: () async {
+              final v = ctrl.text.trim();
+              if (v.isNotEmpty) {
+                await _setPref('ls_greeting', v);
+                setState(() => _greeting = v);
+              }
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            child: const Text('Valider'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -1179,8 +1506,70 @@ class _SettingsPageState extends State<_SettingsPage> {
         padding: const EdgeInsets.all(20),
         children: [
           Text('Paramètres',
-            style: text.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
+              style: text.headlineSmall
+                  ?.copyWith(fontWeight: FontWeight.w800)),
           const SizedBox(height: 20),
+
+          // ════════════════════════════════════
+          // BANNIÈRE MISE À JOUR
+          // ════════════════════════════════════
+          if (_updateInfo != null) ...[
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: scheme.tertiaryContainer,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Row(children: [
+                Icon(Icons.system_update_rounded,
+                    color: scheme.onTertiaryContainer, size: 28),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Mise à jour disponible — v${_updateInfo!.version}',
+                          style: text.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: scheme.onTertiaryContainer)),
+                      if (_updateInfo!.notes.isNotEmpty)
+                        Text(
+                          _updateInfo!.notes.length > 120
+                              ? '${_updateInfo!.notes.substring(0, 120)}…'
+                              : _updateInfo!.notes,
+                          style: text.bodySmall?.copyWith(
+                              color: scheme.onTertiaryContainer
+                                  .withValues(alpha: 0.8)),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: () async {
+                    final url = Uri.parse(
+                        _updateInfo!.hasApk
+                            ? _updateInfo!.apkUrl!
+                            : _updateInfo!.releaseUrl);
+                    if (await canLaunchUrl(url)) {
+                      await launchUrl(url,
+                          mode: LaunchMode.externalApplication);
+                    }
+                  },
+                  style: FilledButton.styleFrom(
+                    backgroundColor: scheme.tertiary,
+                    foregroundColor: scheme.onTertiary,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                    textStyle: text.labelMedium,
+                  ),
+                  child: Text(
+                      _updateInfo!.hasApk ? 'Télécharger' : 'Voir'),
+                ),
+              ]),
+            ),
+            const SizedBox(height: 16),
+          ],
 
           // ════════════════════════════════════
           // APPARENCE
@@ -1194,22 +1583,33 @@ class _SettingsPageState extends State<_SettingsPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(children: [
-                    Icon(Icons.contrast_rounded, size: 18, color: scheme.primary),
+                    Icon(Icons.contrast_rounded,
+                        size: 18, color: scheme.primary),
                     const SizedBox(width: 8),
-                    Text('Thème', style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                    Text('Thème',
+                        style: text.bodyMedium
+                            ?.copyWith(fontWeight: FontWeight.w600)),
                   ]),
                   const SizedBox(height: 10),
                   SegmentedButton<String>(
                     segments: const [
-                      ButtonSegment(value: 'system', icon: Icon(Icons.brightness_auto_rounded), label: Text('Auto')),
-                      ButtonSegment(value: 'light',  icon: Icon(Icons.light_mode_rounded),      label: Text('Clair')),
-                      ButtonSegment(value: 'dark',   icon: Icon(Icons.dark_mode_rounded),        label: Text('Sombre')),
+                      ButtonSegment(
+                          value: 'system',
+                          icon: Icon(Icons.brightness_auto_rounded),
+                          label: Text('Auto')),
+                      ButtonSegment(
+                          value: 'light',
+                          icon: Icon(Icons.light_mode_rounded),
+                          label: Text('Clair')),
+                      ButtonSegment(
+                          value: 'dark',
+                          icon: Icon(Icons.dark_mode_rounded),
+                          label: Text('Sombre')),
                     ],
                     selected: {_theme},
                     onSelectionChanged: (s) => _setTheme(s.first),
-                    style: ButtonStyle(
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
+                    style: const ButtonStyle(
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap),
                   ),
                 ],
               ),
@@ -1224,10 +1624,12 @@ class _SettingsPageState extends State<_SettingsPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(children: [
-                    Icon(Icons.palette_rounded, size: 18, color: scheme.primary),
+                    Icon(Icons.palette_rounded,
+                        size: 18, color: scheme.primary),
                     const SizedBox(width: 8),
                     Text("Couleur d'accent",
-                        style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                        style: text.bodyMedium
+                            ?.copyWith(fontWeight: FontWeight.w600)),
                   ]),
                   const SizedBox(height: 12),
                   Wrap(
@@ -1247,10 +1649,16 @@ class _SettingsPageState extends State<_SettingsPage> {
                               color: color,
                               shape: BoxShape.circle,
                               border: selected
-                                  ? Border.all(color: scheme.onSurface, width: 3)
-                                  : Border.all(color: Colors.transparent, width: 3),
+                                  ? Border.all(
+                                      color: scheme.onSurface, width: 3)
+                                  : Border.all(
+                                      color: Colors.transparent, width: 3),
                               boxShadow: selected
-                                  ? [BoxShadow(color: color.withValues(alpha: 0.5), blurRadius: 8)]
+                                  ? [
+                                      BoxShadow(
+                                          color: color.withValues(alpha: 0.5),
+                                          blurRadius: 8)
+                                    ]
                                   : [],
                             ),
                             child: selected
@@ -1279,14 +1687,17 @@ class _SettingsPageState extends State<_SettingsPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(children: [
-                    Icon(Icons.rocket_launch_rounded, size: 18, color: scheme.primary),
+                    Icon(Icons.rocket_launch_rounded,
+                        size: 18, color: scheme.primary),
                     const SizedBox(width: 8),
                     Text("Onglet à l'ouverture",
-                        style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                        style: text.bodyMedium
+                            ?.copyWith(fontWeight: FontWeight.w600)),
                   ]),
                   const SizedBox(height: 4),
                   Text("Quel onglet afficher au lancement de l'app.",
-                    style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                      style: text.bodySmall
+                          ?.copyWith(color: scheme.onSurfaceVariant)),
                   const SizedBox(height: 12),
                   Wrap(
                     spacing: 8,
@@ -1310,7 +1721,120 @@ class _SettingsPageState extends State<_SettingsPage> {
           const SizedBox(height: 16),
 
           // ════════════════════════════════════
-          // PÉRIODE PAR DÉFAUT
+          // DASHBOARD — PERSONNALISATION
+          // ════════════════════════════════════
+          _SettingsSection(label: 'Dashboard', children: [
+
+            // ── Salutation ──
+            ListTile(
+              leading: Icon(Icons.waving_hand_rounded,
+                  color: scheme.primary, size: 22),
+              title: const Text('Salutation'),
+              subtitle: Text(_greeting),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: _pickGreeting,
+            ),
+            const Divider(height: 1, indent: 16, endIndent: 16),
+
+            // ── Sections visibles ──
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: Text('Sections visibles',
+                  style: text.bodySmall?.copyWith(
+                      color: scheme.primary, fontWeight: FontWeight.w700)),
+            ),
+            SwitchListTile(
+              secondary: const Icon(Icons.play_circle_outline_rounded),
+              title: const Text('En cours de lecture'),
+              value: _showNowPlay,
+              onChanged: (v) async {
+                await _setPref('ls_show_nowplay', v);
+                setState(() => _showNowPlay = v);
+              },
+            ),
+            SwitchListTile(
+              secondary: const Icon(Icons.bar_chart_rounded),
+              title: const Text('Statistiques'),
+              value: _showStats,
+              onChanged: (v) async {
+                await _setPref('ls_show_stats', v);
+                setState(() => _showStats = v);
+              },
+            ),
+            SwitchListTile(
+              secondary: const Icon(Icons.mic_rounded),
+              title: const Text('Top Artistes'),
+              value: _showArtists,
+              onChanged: (v) async {
+                await _setPref('ls_show_artists', v);
+                setState(() => _showArtists = v);
+              },
+            ),
+            SwitchListTile(
+              secondary: const Icon(Icons.music_note_rounded),
+              title: const Text('Top Titres'),
+              value: _showTracks,
+              onChanged: (v) async {
+                await _setPref('ls_show_tracks', v);
+                setState(() => _showTracks = v);
+              },
+            ),
+
+            const Divider(height: 1, indent: 16, endIndent: 16),
+
+            // ── Période artistes ──
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: Text('Périodes par défaut',
+                  style: text.bodySmall?.copyWith(
+                      color: scheme.primary, fontWeight: FontWeight.w700)),
+            ),
+            ListTile(
+              leading:
+                  Icon(Icons.mic_rounded, size: 20, color: scheme.secondary),
+              title: const Text('Artistes'),
+              trailing: Text(
+                _kPeriods
+                    .firstWhere((p) => p.$1 == _artistPeriod,
+                        orElse: () => (_artistPeriod, _artistPeriod))
+                    .$2,
+                style: text.bodySmall?.copyWith(color: scheme.primary),
+              ),
+              onTap: () => _showPeriodSheet(
+                title:   'Période — Artistes',
+                current: _artistPeriod,
+                onPick:  (p) async {
+                  await _setPref('ls_dash_artist_period', p);
+                  setState(() => _artistPeriod = p);
+                },
+              ),
+            ),
+            ListTile(
+              leading: Icon(Icons.music_note_rounded,
+                  size: 20, color: scheme.secondary),
+              title: const Text('Titres'),
+              trailing: Text(
+                _kPeriods
+                    .firstWhere((p) => p.$1 == _trackPeriod,
+                        orElse: () => (_trackPeriod, _trackPeriod))
+                    .$2,
+                style: text.bodySmall?.copyWith(color: scheme.primary),
+              ),
+              onTap: () => _showPeriodSheet(
+                title:   'Période — Titres',
+                current: _trackPeriod,
+                onPick:  (p) async {
+                  await _setPref('ls_dash_track_period', p);
+                  setState(() => _trackPeriod = p);
+                },
+              ),
+            ),
+          ]),
+
+          const SizedBox(height: 16),
+
+          // ════════════════════════════════════
+          // CLASSEMENTS — PÉRIODE
           // ════════════════════════════════════
           _SettingsSection(label: 'Classements', children: [
             Padding(
@@ -1319,14 +1843,17 @@ class _SettingsPageState extends State<_SettingsPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(children: [
-                    Icon(Icons.schedule_rounded, size: 18, color: scheme.primary),
+                    Icon(Icons.schedule_rounded,
+                        size: 18, color: scheme.primary),
                     const SizedBox(width: 8),
                     Text('Période par défaut',
-                        style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                        style: text.bodyMedium
+                            ?.copyWith(fontWeight: FontWeight.w600)),
                   ]),
                   const SizedBox(height: 4),
                   Text('Période présélectionnée dans les classements.',
-                    style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                      style: text.bodySmall
+                          ?.copyWith(color: scheme.onSurfaceVariant)),
                   const SizedBox(height: 12),
                   Wrap(
                     spacing: 8,
@@ -1336,13 +1863,54 @@ class _SettingsPageState extends State<_SettingsPage> {
                       return FilterChip(
                         label: Text(p.$2),
                         selected: sel,
-                        onSelected: (_) => _setPeriod(p.$1),
+                        onSelected: (_) => _setDefaultPeriod(p.$1),
                         showCheckmark: false,
                       );
                     }).toList(),
                   ),
                 ],
               ),
+            ),
+          ]),
+
+          const SizedBox(height: 16),
+
+          // ════════════════════════════════════
+          // MISES À JOUR
+          // ════════════════════════════════════
+          _SettingsSection(label: 'Mises à jour', children: [
+            SwitchListTile(
+              secondary: const Icon(Icons.update_rounded),
+              title: const Text('Vérification automatique'),
+              subtitle: const Text('Une fois par jour au démarrage'),
+              value: _autoUpdate,
+              onChanged: (v) async {
+                await _setPref('ls_auto_update_check', v);
+                setState(() => _autoUpdate = v);
+              },
+            ),
+            const Divider(height: 1, indent: 16, endIndent: 16),
+            ListTile(
+              leading: _checkingUpdate
+                  ? const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : Icon(Icons.search_rounded, color: scheme.primary),
+              title: const Text('Vérifier maintenant'),
+              subtitle: _updateError != null
+                  ? Text(_updateError!,
+                      style: text.bodySmall
+                          ?.copyWith(color: scheme.error))
+                  : _updateInfo == null
+                      ? Text('Version actuelle : v${UpdateService.currentVersion}',
+                          style: text.bodySmall
+                              ?.copyWith(color: scheme.onSurfaceVariant))
+                      : Text('v${_updateInfo!.version} disponible !',
+                          style: text.bodySmall?.copyWith(
+                              color: scheme.tertiary,
+                              fontWeight: FontWeight.w700)),
+              onTap: _checkingUpdate ? null : () => _checkUpdate(),
             ),
           ]),
 
@@ -1360,24 +1928,22 @@ class _SettingsPageState extends State<_SettingsPage> {
             const Divider(height: 1, indent: 16, endIndent: 16),
             ListTile(
               leading: Icon(Icons.logout_rounded, color: scheme.error),
-              title: Text('Se déconnecter',
-                  style: TextStyle(color: scheme.error)),
+              title:
+                  Text('Se déconnecter', style: TextStyle(color: scheme.error)),
               onTap: () async {
                 final confirm = await showDialog<bool>(
                   context: context,
                   builder: (ctx) => AlertDialog(
                     title: const Text('Se déconnecter ?'),
                     content: const Text(
-                        'Tes identifiants seront supprimés de l\'appareil.'),
+                        "Tes identifiants seront supprimés de l'appareil."),
                     actions: [
                       TextButton(
-                        onPressed: () => Navigator.pop(ctx, false),
-                        child: const Text('Annuler'),
-                      ),
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: const Text('Annuler')),
                       FilledButton(
-                        onPressed: () => Navigator.pop(ctx, true),
-                        child: const Text('Déconnecter'),
-                      ),
+                          onPressed: () => Navigator.pop(ctx, true),
+                          child: const Text('Déconnecter')),
                     ],
                   ),
                 );
@@ -1387,9 +1953,9 @@ class _SettingsPageState extends State<_SettingsPage> {
                   await prefs.remove('ls_apikey');
                   if (context.mounted) {
                     Navigator.of(context).pushAndRemoveUntil(
-                      MaterialPageRoute(builder: (_) => const SetupScreen()),
-                      (_) => false,
-                    );
+                        MaterialPageRoute(
+                            builder: (_) => const SetupScreen()),
+                        (_) => false);
                   }
                 }
               },
@@ -1402,34 +1968,140 @@ class _SettingsPageState extends State<_SettingsPage> {
           // À PROPOS
           // ════════════════════════════════════
           _SettingsSection(label: 'À propos', children: [
+
+            // Logo + version
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Row(children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: Image.asset(
+                    'assets/images/icon.png',
+                    width: 56, height: 56, fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Container(
+                      width: 56, height: 56,
+                      decoration: BoxDecoration(
+                        color: scheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Icon(Icons.headphones_rounded,
+                          size: 28, color: scheme.onPrimaryContainer),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('LastStats Mobile',
+                        style: text.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w800)),
+                    Text('v${UpdateService.currentVersion} · API Last.fm',
+                        style: text.bodySmall
+                            ?.copyWith(color: scheme.onSurfaceVariant)),
+                  ],
+                ),
+              ]),
+            ),
+
+            const Divider(height: 1, indent: 16, endIndent: 16),
+
             ListTile(
               leading: const Icon(Icons.web_rounded),
               title: const Text('Version web complète'),
               subtitle: const Text('sanobld.github.io/LastStats'),
               trailing: const Icon(Icons.open_in_new_rounded, size: 16),
-              onTap: () {
-                // Ajouter url_launcher si besoin
+              onTap: () async {
+                final uri =
+                    Uri.parse('https://sanobld.github.io/LastStats');
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri,
+                      mode: LaunchMode.externalApplication);
+                }
               },
             ),
             const Divider(height: 1, indent: 16, endIndent: 16),
-            const ListTile(
-              leading: Icon(Icons.info_outline_rounded),
-              title: Text('LastStats Mobile'),
-              subtitle: Text('v1.1.0 · Propulsé par l\'API Last.fm'),
+            ListTile(
+              leading: const Icon(Icons.code_rounded),
+              title: const Text('Code source'),
+              subtitle: const Text('github.com/sanobld/LastStats'),
+              trailing: const Icon(Icons.open_in_new_rounded, size: 16),
+              onTap: () async {
+                final uri =
+                    Uri.parse('https://github.com/sanobld/LastStats');
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri,
+                      mode: LaunchMode.externalApplication);
+                }
+              },
             ),
           ]),
 
-          const SizedBox(height: 12),
+          const SizedBox(height: 24),
           Center(
-            child: Text('LastStats Mobile v1.1.0',
-              style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+            child: Text('LastStats Mobile v${UpdateService.currentVersion}',
+                style:
+                    text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
           ),
+          const SizedBox(height: 8),
         ],
+      ),
+    );
+  }
+
+  void _showPeriodSheet({
+    required String title,
+    required String current,
+    required void Function(String) onPick,
+  }) {
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Container(
+              width: 36, height: 4,
+              decoration: BoxDecoration(
+                color: Theme.of(ctx)
+                    .colorScheme
+                    .onSurfaceVariant
+                    .withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(title,
+                style: Theme.of(ctx)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 4),
+            ..._kPeriods.map((p) => ListTile(
+                  title: Text(p.$2),
+                  trailing: current == p.$1
+                      ? Icon(Icons.check_rounded,
+                          color: Theme.of(ctx).colorScheme.primary)
+                      : null,
+                  onTap: () {
+                    onPick(p.$1);
+                    Navigator.pop(ctx);
+                  },
+                )),
+            const SizedBox(height: 8),
+          ],
+        ),
       ),
     );
   }
 }
 
+// ═══════════════════════════════════════════════════════
+// SECTION HEADER
+// ═══════════════════════════════════════════════════════
 class _SettingsSection extends StatelessWidget {
   final String label;
   final List<Widget> children;
@@ -1445,16 +2117,17 @@ class _SettingsSection extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(left: 4, bottom: 6),
           child: Text(label.toUpperCase(),
-            style: text.labelSmall?.copyWith(
-              color: scheme.primary,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 1.2,
-            )),
+              style: text.labelSmall?.copyWith(
+                color:          scheme.primary,
+                fontWeight:     FontWeight.w700,
+                letterSpacing:  1.2,
+              )),
         ),
         Card(
           elevation: 0,
           color: scheme.surfaceContainerHighest,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16)),
           child: Column(children: children),
         ),
       ],
@@ -1466,13 +2139,96 @@ class _SettingsSection extends StatelessWidget {
 // WIDGETS RÉUTILISABLES
 // ═══════════════════════════════════════════════════════
 
+/// Image asynchrone avec fallback multi-sources via ImageService.
+/// Affiche un placeholder animé pendant la résolution.
+class _SmartImage extends StatelessWidget {
+  final String? initialUrl;
+  final Future<String> Function() resolver;
+  final double size;
+  final double borderRadius;
+
+  const _SmartImage({
+    required this.resolver,
+    required this.size,
+    required this.borderRadius,
+    this.initialUrl,
+  });
+
+  static const _placeholder = '2a96cbd8b46e442fc41c2b86b821562f';
+
+  bool get _needsResolve =>
+      initialUrl == null ||
+      initialUrl!.isEmpty ||
+      initialUrl!.contains(_placeholder);
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    if (!_needsResolve) {
+      return _buildImage(context, initialUrl!, scheme);
+    }
+
+    return FutureBuilder<String>(
+      future: resolver(),
+      builder: (ctx, snap) {
+        if (snap.connectionState != ConnectionState.done) {
+          return _loadingBox(scheme);
+        }
+        final url = snap.data ?? '';
+        if (url.isEmpty) return _fallbackBox(scheme);
+        return _buildImage(context, url, scheme);
+      },
+    );
+  }
+
+  Widget _buildImage(BuildContext ctx, String url, ColorScheme scheme) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(borderRadius),
+      child: Image.network(
+        url,
+        width: size, height: size, fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _fallbackBox(scheme),
+      ),
+    );
+  }
+
+  Widget _loadingBox(ColorScheme scheme) => ClipRRect(
+        borderRadius: BorderRadius.circular(borderRadius),
+        child: Container(
+          width: size, height: size,
+          color: scheme.surfaceContainerHighest,
+          child: Center(
+            child: SizedBox(
+              width: size * 0.4, height: size * 0.4,
+              child: CircularProgressIndicator(strokeWidth: 1.5,
+                  color: scheme.primary.withValues(alpha: 0.5)),
+            ),
+          ),
+        ),
+      );
+
+  Widget _fallbackBox(ColorScheme scheme) => ClipRRect(
+        borderRadius: BorderRadius.circular(borderRadius),
+        child: Container(
+          width: size, height: size,
+          color: scheme.surfaceContainerHighest,
+          child: Icon(Icons.music_note_rounded,
+              color: scheme.onSurfaceVariant, size: size * 0.5),
+        ),
+      );
+}
+
 class _StatCard extends StatelessWidget {
   final IconData icon;
   final String value;
   final String label;
   final String? sub;
-  const _StatCard({required this.icon, required this.value,
-      required this.label, this.sub});
+  const _StatCard(
+      {required this.icon,
+      required this.value,
+      required this.label,
+      this.sub});
 
   @override
   Widget build(BuildContext context) {
@@ -1489,16 +2245,18 @@ class _StatCard extends StatelessWidget {
           const SizedBox(width: 16),
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(value,
-              style: text.headlineMedium?.copyWith(
-                fontWeight: FontWeight.w800,
-                color: scheme.onPrimaryContainer)),
+                style: text.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: scheme.onPrimaryContainer)),
             Text(label,
-              style: text.bodySmall?.copyWith(
-                color: scheme.onPrimaryContainer.withValues(alpha: 0.8))),
+                style: text.bodySmall?.copyWith(
+                    color:
+                        scheme.onPrimaryContainer.withValues(alpha: 0.8))),
             if (sub != null)
               Text(sub!,
-                style: text.bodySmall?.copyWith(
-                  color: scheme.onPrimaryContainer.withValues(alpha: 0.65))),
+                  style: text.bodySmall?.copyWith(
+                      color: scheme.onPrimaryContainer
+                          .withValues(alpha: 0.65))),
           ]),
         ]),
       ),
@@ -1518,29 +2276,71 @@ class _SectionHeader extends StatelessWidget {
       Icon(icon, color: scheme.primary, size: 20),
       const SizedBox(width: 8),
       Text(title,
-        style: Theme.of(context).textTheme.titleMedium
-            ?.copyWith(fontWeight: FontWeight.w700)),
+          style: Theme.of(context)
+              .textTheme
+              .titleMedium
+              ?.copyWith(fontWeight: FontWeight.w700)),
     ]);
   }
 }
 
+/// Petit badge cliquable pour changer la période d'une section.
+class _PeriodBadge extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+  const _PeriodBadge({required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: scheme.primaryContainer,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: scheme.onPrimaryContainer,
+                      fontWeight: FontWeight.w600,
+                    )),
+            const SizedBox(width: 2),
+            Icon(Icons.expand_more_rounded,
+                size: 14, color: scheme.onPrimaryContainer),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _ItemTile extends StatelessWidget {
-  final String name;
-  final String sub;
-  final String imageUrl;
-  final String rank;
+  final String  name;
+  final String  sub;
+  final String  imageUrl;
+  final Future<String>? imageFuture;
+  final String  rank;
   final String? plays;
-  const _ItemTile({required this.name, required this.sub,
-      required this.imageUrl, required this.rank, this.plays});
+
+  const _ItemTile({
+    required this.name,
+    required this.sub,
+    required this.imageUrl,
+    required this.rank,
+    this.imageFuture,
+    this.plays,
+  });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final text   = Theme.of(context).textTheme;
-    final url    = imageUrl.isNotEmpty &&
-            !imageUrl.contains('2a96cbd8b46e442fc41c2b86b821562f')
-        ? imageUrl
-        : _kDefaultImg;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -1548,44 +2348,43 @@ class _ItemTile extends StatelessWidget {
         SizedBox(
           width: 28,
           child: Text(rank,
-            textAlign: TextAlign.center,
-            style: text.bodySmall?.copyWith(
-              color: scheme.onSurfaceVariant,
-              fontWeight: FontWeight.w700)),
+              textAlign: TextAlign.center,
+              style: text.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w700)),
         ),
         const SizedBox(width: 8),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: Image.network(url,
-            width: 48, height: 48, fit: BoxFit.cover,
-            errorBuilder: (_, _, _) => Container(
-              width: 48, height: 48,
-              color: scheme.surfaceContainerHighest,
-              child: Icon(Icons.music_note_rounded,
-                  color: scheme.onSurfaceVariant, size: 24),
-            )),
+        _SmartImage(
+          size: 48,
+          borderRadius: 8,
+          initialUrl: imageUrl,
+          resolver: imageFuture != null
+              ? () => imageFuture!
+              : () => Future.value(''),
         ),
         const SizedBox(width: 12),
-        Expanded(child: Column(
+        Expanded(
+            child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style:
+                    text.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
             Text(sub,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: text.bodySmall
+                    ?.copyWith(color: scheme.onSurfaceVariant)),
           ],
         )),
         if (plays != null)
           Padding(
             padding: const EdgeInsets.only(left: 8),
             child: Text(plays!,
-              style: text.bodySmall?.copyWith(
-                color: scheme.primary,
-                fontWeight: FontWeight.w600)),
+                style: text.bodySmall?.copyWith(
+                    color: scheme.primary, fontWeight: FontWeight.w600)),
           ),
       ]),
     );
@@ -1609,8 +2408,8 @@ class _ErrorView extends StatelessWidget {
             Icon(Icons.error_outline_rounded, size: 48, color: scheme.error),
             const SizedBox(height: 12),
             Text(message,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium),
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium),
             const SizedBox(height: 16),
             FilledButton.icon(
               onPressed: onRetry,
@@ -1648,7 +2447,6 @@ String _formatNumber(int n) {
 }
 
 String _formatDate(String raw) {
-  // raw: "12 May 2025, 14:23"  → "12 mai · 14:23"
   if (raw.isEmpty) return '';
   try {
     final parts = raw.split(', ');

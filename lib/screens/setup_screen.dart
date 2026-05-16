@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/lastfm_service.dart';
 import 'home_screen.dart';
 
@@ -14,9 +15,9 @@ class _SetupScreenState extends State<SetupScreen> {
   final _usernameCtrl = TextEditingController();
   final _apikeyCtrl   = TextEditingController();
 
-  bool _obscureApiKey = true;
-  bool _rememberMe    = true;
-  bool _isLoading     = false;
+  bool    _obscureApiKey = true;
+  bool    _rememberMe    = true;
+  bool    _isLoading     = false;
   String? _errorMessage;
 
   @override
@@ -89,17 +90,26 @@ class _SetupScreenState extends State<SetupScreen> {
                   // ── Logo ──────────────────────────────────────
                   Column(
                     children: [
-                      Container(
-                        width: 72,
-                        height: 72,
-                        decoration: BoxDecoration(
-                          color: scheme.primaryContainer,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Icon(
-                          Icons.headphones_rounded,
-                          size: 36,
-                          color: scheme.onPrimaryContainer,
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(24),
+                        child: Image.asset(
+                          'assets/images/icon.png',
+                          width:  80,
+                          height: 80,
+                          fit:    BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Container(
+                            width:  80,
+                            height: 80,
+                            decoration: BoxDecoration(
+                              color: scheme.primaryContainer,
+                              borderRadius: BorderRadius.circular(24),
+                            ),
+                            child: Icon(
+                              Icons.headphones_rounded,
+                              size:  40,
+                              color: scheme.onPrimaryContainer,
+                            ),
+                          ),
                         ),
                       ),
                       const SizedBox(height: 16),
@@ -107,7 +117,7 @@ class _SetupScreenState extends State<SetupScreen> {
                         'LastStats',
                         style: text.headlineMedium?.copyWith(
                           fontWeight: FontWeight.w800,
-                          color: scheme.primary,
+                          color:      scheme.primary,
                         ),
                       ),
                       const SizedBox(height: 4),
@@ -145,15 +155,14 @@ class _SetupScreenState extends State<SetupScreen> {
 
                           // Champ username
                           TextField(
-                            controller: _usernameCtrl,
+                            controller:      _usernameCtrl,
                             textInputAction: TextInputAction.next,
-                            autocorrect: false,
+                            autocorrect:     false,
                             decoration: InputDecoration(
-                              labelText: 'Pseudo Last.fm',
+                              labelText:  'Pseudo Last.fm',
                               prefixIcon: const Icon(Icons.person_outline_rounded),
                               border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
+                                  borderRadius: BorderRadius.circular(12)),
                             ),
                           ),
 
@@ -161,28 +170,25 @@ class _SetupScreenState extends State<SetupScreen> {
 
                           // Champ API key
                           TextField(
-                            controller: _apikeyCtrl,
-                            textInputAction: TextInputAction.done,
-                            obscureText: _obscureApiKey,
-                            autocorrect: false,
+                            controller:       _apikeyCtrl,
+                            textInputAction:  TextInputAction.done,
+                            obscureText:      _obscureApiKey,
+                            autocorrect:      false,
                             enableSuggestions: false,
                             onSubmitted: (_) => _launch(),
                             decoration: InputDecoration(
                               labelText: 'Clé API Last.fm',
-                              hintText: 'Clé hexadécimale de 32 caractères',
+                              hintText:  'Clé hexadécimale de 32 caractères',
                               prefixIcon: const Icon(Icons.key_rounded),
                               suffixIcon: IconButton(
-                                icon: Icon(
-                                  _obscureApiKey
-                                      ? Icons.visibility_outlined
-                                      : Icons.visibility_off_outlined,
-                                ),
+                                icon: Icon(_obscureApiKey
+                                    ? Icons.visibility_outlined
+                                    : Icons.visibility_off_outlined),
                                 onPressed: () =>
                                     setState(() => _obscureApiKey = !_obscureApiKey),
                               ),
                               border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
+                                  borderRadius: BorderRadius.circular(12)),
                             ),
                           ),
 
@@ -198,8 +204,7 @@ class _SetupScreenState extends State<SetupScreen> {
                                 child: Text(
                                   'Stockée localement. Jamais envoyée à un tiers.',
                                   style: text.bodySmall?.copyWith(
-                                    color: scheme.onSurfaceVariant,
-                                  ),
+                                      color: scheme.onSurfaceVariant),
                                 ),
                               ),
                             ],
@@ -211,12 +216,11 @@ class _SetupScreenState extends State<SetupScreen> {
                           Row(
                             children: [
                               Checkbox(
-                                value: _rememberMe,
+                                value:     _rememberMe,
                                 onChanged: (v) =>
                                     setState(() => _rememberMe = v ?? true),
                                 shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
+                                    borderRadius: BorderRadius.circular(4)),
                               ),
                               GestureDetector(
                                 onTap: () =>
@@ -233,22 +237,18 @@ class _SetupScreenState extends State<SetupScreen> {
                             onPressed: _isLoading ? null : _launch,
                             icon: _isLoading
                                 ? SizedBox(
-                                    width: 18,
-                                    height: 18,
+                                    width: 18, height: 18,
                                     child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: scheme.onPrimary,
-                                    ),
+                                        strokeWidth: 2, color: scheme.onPrimary),
                                   )
                                 : const Icon(Icons.bar_chart_rounded),
-                            label: Text(
-                              _isLoading ? 'Connexion…' : 'Lancer l\'analyse',
-                            ),
+                            label: Text(_isLoading
+                                ? 'Connexion…'
+                                : "Lancer l'analyse"),
                             style: FilledButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 14),
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
+                                  borderRadius: BorderRadius.circular(12)),
                             ),
                           ),
 
@@ -258,7 +258,7 @@ class _SetupScreenState extends State<SetupScreen> {
                             Container(
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
-                                color: scheme.errorContainer,
+                                color:        scheme.errorContainer,
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Row(
@@ -270,8 +270,7 @@ class _SetupScreenState extends State<SetupScreen> {
                                     child: Text(
                                       _errorMessage!,
                                       style: text.bodySmall?.copyWith(
-                                        color: scheme.onErrorContainer,
-                                      ),
+                                          color: scheme.onErrorContainer),
                                     ),
                                   ),
                                 ],
@@ -287,8 +286,15 @@ class _SetupScreenState extends State<SetupScreen> {
 
                   Center(
                     child: TextButton.icon(
-                      onPressed: () {},
-                      icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                      onPressed: () async {
+                        final uri = Uri.parse(
+                            'https://www.last.fm/api/account/create');
+                        if (await canLaunchUrl(uri)) {
+                          await launchUrl(uri,
+                              mode: LaunchMode.externalApplication);
+                        }
+                      },
+                      icon:  const Icon(Icons.open_in_new_rounded, size: 16),
                       label: const Text('Obtenir une clé API gratuitement'),
                     ),
                   ),
