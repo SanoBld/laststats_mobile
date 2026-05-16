@@ -26,4 +26,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: laststats-windows-app
-          path: build/windows/x64/release/
+          # On cible précisément le dossier "runner" ou "Release" qui contient le .exe et les .dll
+          path: |
+            build/windows/x64/release/runner/
+            build/windows/runner/Release/
+          if-no-files-found: error
