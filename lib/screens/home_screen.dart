@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../app_state.dart';
 import '../services/lastfm_service.dart';
 import 'setup_screen.dart';
 
@@ -23,19 +24,26 @@ const _kPeriods = [
 class HomeScreen extends StatefulWidget {
   final String username;
   final String apiKey;
-  const HomeScreen({super.key, required this.username, required this.apiKey});
+  final int    startupTab;
+  const HomeScreen({
+    super.key,
+    required this.username,
+    required this.apiKey,
+    this.startupTab = 0,
+  });
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  int _idx = 0;
+  late int _idx;
   late final LastFmService _service;
 
   @override
   void initState() {
     super.initState();
+    _idx     = widget.startupTab.clamp(0, 4);
     _service = LastFmService(apiKey: widget.apiKey, username: widget.username);
   }
 
@@ -1077,9 +1085,89 @@ class _HistoryPageState extends State<_HistoryPage>
 // ═══════════════════════════════════════════════════════
 // PARAMÈTRES
 // ═══════════════════════════════════════════════════════
-class _SettingsPage extends StatelessWidget {
+
+// Palettes accent — synchronisées avec le site web
+const _kAccentOptions = [
+  (Color(0xFF7C3AED), 'purple', 'Violet'),
+  (Color(0xFF1D4ED8), 'blue',   'Bleu'),
+  (Color(0xFF059669), 'green',  'Vert'),
+  (Color(0xFFDC2626), 'red',    'Rouge'),
+  (Color(0xFFD97706), 'orange', 'Orange'),
+  (Color(0xFFDB2777), 'pink',   'Rose'),
+];
+
+const _kStartupLabels = [
+  (Icons.dashboard_rounded,   'Dashboard'),
+  (Icons.leaderboard_rounded, 'Classements'),
+  (Icons.bar_chart_rounded,   'Graphiques'),
+  (Icons.history_rounded,     'Historique'),
+];
+
+const _kPeriodLabels = [
+  ('7day',    '7 jours'),
+  ('1month',  '1 mois'),
+  ('3month',  '3 mois'),
+  ('6month',  '6 mois'),
+  ('12month', 'Année'),
+  ('overall', 'Tout'),
+];
+
+class _SettingsPage extends StatefulWidget {
   final String username;
   const _SettingsPage({required this.username});
+
+  @override
+  State<_SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<_SettingsPage> {
+  String _theme      = 'system';
+  String _accent     = 'purple';
+  int    _startupTab = 0;
+  String _period     = 'overall';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPrefs();
+  }
+
+  Future<void> _loadPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _theme      = prefs.getString('ls_theme')       ?? 'system';
+      _accent     = prefs.getString('ls_accent')      ?? 'purple';
+      _startupTab = prefs.getInt('ls_startup_tab')    ?? 0;
+      _period     = prefs.getString('ls_default_period') ?? 'overall';
+    });
+  }
+
+  Future<void> _setTheme(String value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('ls_theme', value);
+    setState(() => _theme = value);
+    themeModeNotifier.value = themeFromString(value);
+  }
+
+  Future<void> _setAccent(String key, Color color) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('ls_accent', key);
+    setState(() => _accent = key);
+    accentNotifier.value = color;
+  }
+
+  Future<void> _setStartupTab(int idx) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('ls_startup_tab', idx);
+    setState(() => _startupTab = idx);
+  }
+
+  Future<void> _setPeriod(String p) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('ls_default_period', p);
+    setState(() => _period = p);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1094,12 +1182,180 @@ class _SettingsPage extends StatelessWidget {
             style: text.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
           const SizedBox(height: 20),
 
-          // ── Compte ──
+          // ════════════════════════════════════
+          // APPARENCE
+          // ════════════════════════════════════
+          _SettingsSection(label: 'Apparence', children: [
+
+            // ── Thème ──
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Icon(Icons.contrast_rounded, size: 18, color: scheme.primary),
+                    const SizedBox(width: 8),
+                    Text('Thème', style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                  ]),
+                  const SizedBox(height: 10),
+                  SegmentedButton<String>(
+                    segments: const [
+                      ButtonSegment(value: 'system', icon: Icon(Icons.brightness_auto_rounded), label: Text('Auto')),
+                      ButtonSegment(value: 'light',  icon: Icon(Icons.light_mode_rounded),      label: Text('Clair')),
+                      ButtonSegment(value: 'dark',   icon: Icon(Icons.dark_mode_rounded),        label: Text('Sombre')),
+                    ],
+                    selected: {_theme},
+                    onSelectionChanged: (s) => _setTheme(s.first),
+                    style: ButtonStyle(
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const Divider(height: 1, indent: 16, endIndent: 16),
+
+            // ── Couleur d'accent ──
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Icon(Icons.palette_rounded, size: 18, color: scheme.primary),
+                    const SizedBox(width: 8),
+                    Text("Couleur d'accent",
+                        style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                  ]),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: _kAccentOptions.map((opt) {
+                      final (color, key, label) = opt;
+                      final selected = _accent == key;
+                      return GestureDetector(
+                        onTap: () => _setAccent(key, color),
+                        child: Tooltip(
+                          message: label,
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            width: 36, height: 36,
+                            decoration: BoxDecoration(
+                              color: color,
+                              shape: BoxShape.circle,
+                              border: selected
+                                  ? Border.all(color: scheme.onSurface, width: 3)
+                                  : Border.all(color: Colors.transparent, width: 3),
+                              boxShadow: selected
+                                  ? [BoxShadow(color: color.withValues(alpha: 0.5), blurRadius: 8)]
+                                  : [],
+                            ),
+                            child: selected
+                                ? const Icon(Icons.check_rounded,
+                                    color: Colors.white, size: 18)
+                                : null,
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+            ),
+          ]),
+
+          const SizedBox(height: 16),
+
+          // ════════════════════════════════════
+          // PAGE DE DÉMARRAGE
+          // ════════════════════════════════════
+          _SettingsSection(label: 'Page de démarrage', children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Icon(Icons.rocket_launch_rounded, size: 18, color: scheme.primary),
+                    const SizedBox(width: 8),
+                    Text("Onglet à l'ouverture",
+                        style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                  ]),
+                  const SizedBox(height: 4),
+                  Text("Quel onglet afficher au lancement de l'app.",
+                    style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _kStartupLabels.asMap().entries.map((e) {
+                      final sel = _startupTab == e.key;
+                      return FilterChip(
+                        avatar: Icon(e.value.$1, size: 16),
+                        label: Text(e.value.$2),
+                        selected: sel,
+                        onSelected: (_) => _setStartupTab(e.key),
+                        showCheckmark: false,
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+            ),
+          ]),
+
+          const SizedBox(height: 16),
+
+          // ════════════════════════════════════
+          // PÉRIODE PAR DÉFAUT
+          // ════════════════════════════════════
+          _SettingsSection(label: 'Classements', children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Icon(Icons.schedule_rounded, size: 18, color: scheme.primary),
+                    const SizedBox(width: 8),
+                    Text('Période par défaut',
+                        style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                  ]),
+                  const SizedBox(height: 4),
+                  Text('Période présélectionnée dans les classements.',
+                    style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _kPeriodLabels.map((p) {
+                      final sel = _period == p.$1;
+                      return FilterChip(
+                        label: Text(p.$2),
+                        selected: sel,
+                        onSelected: (_) => _setPeriod(p.$1),
+                        showCheckmark: false,
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+            ),
+          ]),
+
+          const SizedBox(height: 16),
+
+          // ════════════════════════════════════
+          // COMPTE
+          // ════════════════════════════════════
           _SettingsSection(label: 'Compte', children: [
             ListTile(
               leading: const Icon(Icons.person_rounded),
               title: const Text('Profil connecté'),
-              subtitle: Text('@$username'),
+              subtitle: Text('@${widget.username}'),
             ),
             const Divider(height: 1, indent: 16, endIndent: 16),
             ListTile(
@@ -1142,7 +1398,9 @@ class _SettingsPage extends StatelessWidget {
 
           const SizedBox(height: 16),
 
-          // ── À propos ──
+          // ════════════════════════════════════
+          // À PROPOS
+          // ════════════════════════════════════
           _SettingsSection(label: 'À propos', children: [
             ListTile(
               leading: const Icon(Icons.web_rounded),
@@ -1150,7 +1408,7 @@ class _SettingsPage extends StatelessWidget {
               subtitle: const Text('sanobld.github.io/LastStats'),
               trailing: const Icon(Icons.open_in_new_rounded, size: 16),
               onTap: () {
-                // URL launch : ajouter url_launcher si besoin
+                // Ajouter url_launcher si besoin
               },
             ),
             const Divider(height: 1, indent: 16, endIndent: 16),
