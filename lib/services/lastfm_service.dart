@@ -1,213 +1,177 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
-/// Équivalent de l'objet API + Cache de script.js
 class LastFmService {
-  static const _baseUrl  = 'https://ws.audioscrobbler.com/2.0/';
-  static const _cacheTtl = Duration(minutes: 30);
-
   final String apiKey;
   final String username;
 
-  // Cache en mémoire (clé → {data, timestamp})
-  final Map<String, _CacheEntry> _cache = {};
+  static const _host    = 'ws.audioscrobbler.com';
+  static const _path    = '/2.0/';
+  static const _timeout = Duration(seconds: 15);
 
-  LastFmService({required this.apiKey, required this.username});
+  const LastFmService({required this.apiKey, required this.username});
 
-  // ─────────────────────────────────────────────────────────
-  // Interne : construit l'URL et fait l'appel HTTP avec retry
-  // ─────────────────────────────────────────────────────────
-  Future<Map<String, dynamic>> _fetch(
-    String method, {
-    Map<String, String> params = const {},
-    int retries = 3,
-  }) async {
-    final queryParams = {
-      'method':  method,
-      'api_key': apiKey,
-      'user':    username,
-      'format':  'json',
+  // ── Core request ────────────────────────────────────────
+  Future<dynamic> _call(Map<String, String> params) async {
+    final uri = Uri.https(_host, _path, {
       ...params,
-    };
-
-    final uri = Uri.parse(_baseUrl).replace(queryParameters: queryParams);
-
-    for (int attempt = 0; attempt < retries; attempt++) {
-      try {
-        final response = await http
-            .get(uri)
-            .timeout(const Duration(seconds: 15));
-
-        if (response.statusCode != 200) {
-          throw Exception('HTTP ${response.statusCode}');
-        }
-
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-
-        if (data.containsKey('error')) {
-          throw Exception(data['message'] ?? 'API error ${data['error']}');
-        }
-
-        return data;
-      } catch (e) {
-        if (attempt == retries - 1) rethrow;
-        await Future.delayed(Duration(milliseconds: 800 * (attempt + 1)));
-      }
+      'api_key': apiKey,
+      'format':  'json',
+    });
+    final res = await http.get(uri).timeout(_timeout);
+    if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
+    final body = jsonDecode(utf8.decode(res.bodyBytes));
+    if (body['error'] != null) {
+      throw Exception(body['message'] ?? 'Erreur API Last.fm');
     }
-
-    throw Exception('Impossible de joindre Last.fm.');
+    return body;
   }
 
-  // ─────────────────────────────────────────────────────────
-  // Avec cache (équivalent de API.call dans script.js)
-  // ─────────────────────────────────────────────────────────
-  Future<Map<String, dynamic>> _call(
-    String method, {
-    Map<String, String> params = const {},
-    bool skipCache = false,
-  }) async {
-    final cacheKey = '${username}_${method}_${jsonEncode(params)}';
+  static List<dynamic> _asList(dynamic v) =>
+      v == null ? [] : (v is List ? v : [v]);
 
-    if (!skipCache) {
-      final entry = _cache[cacheKey];
-      if (entry != null &&
-          DateTime.now().difference(entry.timestamp) < _cacheTtl) {
-        return entry.data;
-      }
-    }
-
-    final data = await _fetch(method, params: params);
-    _cache[cacheKey] = _CacheEntry(data);
-    return data;
+  // ── User ────────────────────────────────────────────────
+  Future<Map<String, dynamic>?> getUserInfo({String? user}) async {
+    final d = await _call({'method': 'user.getInfo', 'user': user ?? username});
+    return d['user'] as Map<String, dynamic>?;
   }
 
-  /// Vide le cache en mémoire
-  void clearCache() => _cache.clear();
-
-  // ─────────────────────────────────────────────────────────
-  // API publique
-  // ─────────────────────────────────────────────────────────
-
-  /// user.getInfo — infos du profil (avatar, scrobbles totaux, date inscription…)
-  Future<Map<String, dynamic>?> getUserInfo() async {
-    final data = await _call('user.getInfo');
-    return data['user'] as Map<String, dynamic>?;
-  }
-
-  /// user.getTopArtists
-  /// [period] : '7day' | '1month' | '3month' | '6month' | '12month' | 'overall'
+  // ── Top lists ───────────────────────────────────────────
   Future<List<dynamic>> getTopArtists({
     String period = 'overall',
     int limit = 50,
     int page = 1,
+    String? user,
   }) async {
-    final data = await _call(
-      'user.getTopArtists',
-      params: {
-        'period': period,
-        'limit':  limit.toString(),
-        'page':   page.toString(),
-      },
-    );
-    final raw = data['topartists']?['artist'];
-    if (raw == null) return [];
-    return raw is List ? raw : [raw];
+    final d = await _call({
+      'method': 'user.getTopArtists',
+      'user':   user ?? username,
+      'period': period,
+      'limit':  '$limit',
+      'page':   '$page',
+    });
+    return _asList(d['topartists']?['artist']);
   }
 
-  /// user.getTopAlbums
   Future<List<dynamic>> getTopAlbums({
     String period = 'overall',
     int limit = 50,
     int page = 1,
+    String? user,
   }) async {
-    final data = await _call(
-      'user.getTopAlbums',
-      params: {
-        'period': period,
-        'limit':  limit.toString(),
-        'page':   page.toString(),
-      },
-    );
-    final raw = data['topalbums']?['album'];
-    if (raw == null) return [];
-    return raw is List ? raw : [raw];
+    final d = await _call({
+      'method': 'user.getTopAlbums',
+      'user':   user ?? username,
+      'period': period,
+      'limit':  '$limit',
+      'page':   '$page',
+    });
+    return _asList(d['topalbums']?['album']);
   }
 
-  /// user.getTopTracks
   Future<List<dynamic>> getTopTracks({
     String period = 'overall',
     int limit = 50,
     int page = 1,
+    String? user,
   }) async {
-    final data = await _call(
-      'user.getTopTracks',
-      params: {
-        'period': period,
-        'limit':  limit.toString(),
-        'page':   page.toString(),
-      },
-    );
-    final raw = data['toptracks']?['track'];
-    if (raw == null) return [];
-    return raw is List ? raw : [raw];
+    final d = await _call({
+      'method': 'user.getTopTracks',
+      'user':   user ?? username,
+      'period': period,
+      'limit':  '$limit',
+      'page':   '$page',
+    });
+    return _asList(d['toptracks']?['track']);
   }
 
-  /// user.getRecentTracks — dernières écoutes
+  // ── Recent tracks ───────────────────────────────────────
   Future<Map<String, dynamic>> getRecentTracks({
     int limit = 50,
-    int page = 1,
-    int? from, // Unix timestamp
-    int? to,   // Unix timestamp
+    int page  = 1,
+    int? from,
+    int? to,
+    String? user,
   }) async {
-    final params = <String, String>{
-      'limit': limit.toString(),
-      'page':  page.toString(),
+    final p = <String, String>{
+      'method': 'user.getRecentTracks',
+      'user':   user ?? username,
+      'limit':  '$limit',
+      'page':   '$page',
     };
-    if (from != null) params['from'] = from.toString();
-    if (to   != null) params['to']   = to.toString();
-
-    final data = await _call('user.getRecentTracks', params: params);
-    return data['recenttracks'] as Map<String, dynamic>? ?? {};
+    if (from != null) p['from'] = '$from';
+    if (to   != null) p['to']   = '$to';
+    final d = await _call(p);
+    return (d['recenttracks'] as Map<String, dynamic>?) ?? {};
   }
 
-  /// Nombre de scrobbles sur un mois donné (équivalent de API.getMonthScrobbles)
-  Future<int> getMonthScrobbles(int year, int month) async {
-    final from = DateTime(year, month, 1)
-        .millisecondsSinceEpoch ~/ 1000;
-    final to = DateTime(year, month + 1, 0, 23, 59, 59)
-        .millisecondsSinceEpoch ~/ 1000;
-
+  /// Returns the currently playing track, or null if nothing is playing.
+  Future<Map<String, dynamic>?> getNowPlaying() async {
     try {
-      final data = await _call(
-        'user.getRecentTracks',
-        params: {
-          'from':  from.toString(),
-          'to':    to.toString(),
-          'limit': '1',
-        },
-      );
-      final total = data['recenttracks']?['@attr']?['total'];
-      return int.tryParse(total?.toString() ?? '0') ?? 0;
+      final d      = await getRecentTracks(limit: 1);
+      final tracks = _asList(d['track']);
+      if (tracks.isEmpty) return null;
+      final first = tracks.first as Map<String, dynamic>;
+      return first['@attr']?['nowplaying'] == 'true' ? first : null;
     } catch (_) {
-      return 0;
+      return null;
     }
   }
 
-  /// user.getWeeklyChartList — liste des semaines disponibles
-  Future<List<dynamic>> getWeeklyChartList() async {
-    final data = await _call('user.getWeeklyChartList');
-    final raw = data['weeklychartlist']?['chart'];
-    if (raw == null) return [];
-    return raw is List ? raw : [raw];
+  // ── Monthly scrobble counts (12 parallel requests) ──────
+  Future<Map<String, int>> getMonthlyScrobbles({int months = 12}) async {
+    final now   = DateTime.now();
+    final keys  = <String>[];
+    final futs  = <Future>[];
+
+    for (var i = months - 1; i >= 0; i--) {
+      // Dart handles month underflow correctly (e.g. month 0 → December)
+      final from = DateTime(now.year, now.month - i,     1);
+      final to   = DateTime(now.year, now.month - i + 1, 1);
+      keys.add('${from.year}-${from.month.toString().padLeft(2, '0')}');
+      futs.add(
+        _call({
+          'method': 'user.getRecentTracks',
+          'user':   username,
+          'from':   '${from.millisecondsSinceEpoch ~/ 1000}',
+          'to':     '${to.millisecondsSinceEpoch   ~/ 1000}',
+          'limit':  '1',
+        }).catchError((_) => <String, dynamic>{}),
+      );
+    }
+
+    final results = await Future.wait(futs);
+    return {
+      for (var i = 0; i < keys.length; i++)
+        keys[i]: int.tryParse(
+          ((results[i] as Map?))?['recenttracks']?['@attr']?['total']
+              ?.toString() ?? '0',
+        ) ?? 0,
+    };
   }
-}
 
-// ─────────────────────────────────────────────────────────
-// Classe interne pour le cache
-// ─────────────────────────────────────────────────────────
-class _CacheEntry {
-  final Map<String, dynamic> data;
-  final DateTime timestamp;
+  // ── Loved tracks ────────────────────────────────────────
+  Future<List<dynamic>> getLovedTracks({int limit = 50}) async {
+    final d = await _call({
+      'method': 'user.getLovedTracks',
+      'user':   username,
+      'limit':  '$limit',
+    });
+    return _asList(d['lovedtracks']?['track']);
+  }
 
-  _CacheEntry(this.data) : timestamp = DateTime.now();
+  // ── Artist info (Mainstream vs Gems) ────────────────────
+  Future<int?> getArtistListeners(String artist) async {
+    try {
+      final d = await _call({
+        'method':   'artist.getInfo',
+        'artist':   artist,
+        'username': username,
+      });
+      return int.tryParse(
+          d['artist']?['stats']?['listeners']?.toString() ?? '');
+    } catch (_) {
+      return null;
+    }
+  }
 }
