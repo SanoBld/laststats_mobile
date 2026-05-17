@@ -26,7 +26,11 @@ jobs:
 
       - run: flutter pub get
       
-      - run: flutter build apk --release
+      - name: Build APK avec Version Dynamique
+        shell: bash
+        run: |
+          VERSION=$(grep 'version:' pubspec.yaml | sed 's/version: //g' | cut -d'+' -f1)
+          flutter build apk --release --dart-define=APP_VERSION="$VERSION+${{ github.run_number }}"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

@@ -20,7 +20,11 @@ jobs:
 
       - run: flutter pub get
 
-      - run: flutter build web --release
+      - name: Build Web avec Version Dynamique
+        shell: bash
+        run: |
+          VERSION=$(grep 'version:' pubspec.yaml | sed 's/version: //g' | cut -d'+' -f1)
+          flutter build web --release --dart-define=APP_VERSION="$VERSION+${{ github.run_number }}"
 
       - name: Upload Web App
         uses: actions/upload-artifact@v4

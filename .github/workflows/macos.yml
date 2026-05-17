@@ -20,7 +20,11 @@ jobs:
 
       - run: flutter pub get
 
-      - run: flutter build macos --release
+      - name: Build macOS avec Version Dynamique
+        shell: bash
+        run: |
+          VERSION=$(grep 'version:' pubspec.yaml | sed 's/version: //g' | cut -d'+' -f1)
+          flutter build macos --release --dart-define=APP_VERSION="$VERSION+${{ github.run_number }}"
 
       - name: Upload macOS App
         uses: actions/upload-artifact@v4
