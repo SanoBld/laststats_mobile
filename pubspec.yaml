@@ -14,15 +14,31 @@ dependencies:
   http: ^1.6.0
   dynamic_color: ^1.8.1
   shared_preferences: ^2.2.3
-  url_launcher: ^6.3.0      # Ouvre les liens GitHub, Last.fm, etc.
+  url_launcher: ^6.3.0
+  palette_generator: ^0.3.3   # Extraction couleur depuis pochette
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.3
+
+# ── Icône de l'app ─────────────────────────────────────
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/images/icon-512.png"
+  min_sdk_android: 21
+  adaptive_icon_background: "#1558D6"   # bleu de fond du logo
+  adaptive_icon_foreground: "assets/images/icon-512.png"
+  web:
+    generate: false
+  windows:
+    generate: false
+  macos:
+    generate: false
 
 flutter:
   uses-material-design: true
-
   assets:
-    - assets/images/        # Logo icon.png (512×512 recommandé)
+    - assets/images/

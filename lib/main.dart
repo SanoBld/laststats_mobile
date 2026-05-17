@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:dynamic_color/dynamic_color.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'app_state.dart';
 import 'screens/setup_screen.dart';
@@ -12,9 +13,10 @@ void main() async {
   final apiKey     = prefs.getString('ls_apikey')   ?? '';
   final startupTab = prefs.getInt('ls_startup_tab') ?? 0;
 
-  // Restaurer les préférences d'apparence
-  themeModeNotifier.value = themeFromString(prefs.getString('ls_theme'));
-  accentNotifier.value    = accentFromString(prefs.getString('ls_accent'));
+  themeModeNotifier.value       = themeFromString(prefs.getString('ls_theme'));
+  accentNotifier.value          = accentFromString(prefs.getString('ls_accent'));
+  useDynamicColorNotifier.value = prefs.getBool('ls_use_dynamic_color') ?? false;
+  useNowPlayingColorNotifier.value = prefs.getBool('ls_use_nowplaying_color') ?? false;
 
   runApp(LastStatsApp(
     username:   username,
@@ -37,33 +39,59 @@ class LastStatsApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<Color>(
-      valueListenable: accentNotifier,
-      builder: (_, accent, __) => ValueListenableBuilder<ThemeMode>(
-        valueListenable: themeModeNotifier,
-        builder: (_, mode, __) => MaterialApp(
-          title: 'LastStats',
-          debugShowCheckedModeBanner: false,
-          theme: ThemeData(
-            colorScheme: ColorScheme.fromSeed(
-              seedColor: accent,
-              brightness: Brightness.light,
-            ),
-            useMaterial3: true,
-          ),
-          darkTheme: ThemeData(
-            colorScheme: ColorScheme.fromSeed(
-              seedColor: accent,
-              brightness: Brightness.dark,
-            ),
-            useMaterial3: true,
-          ),
-          themeMode: mode,
-          home: (username.isNotEmpty && apiKey.isNotEmpty)
-              ? HomeScreen(username: username, apiKey: apiKey, startupTab: startupTab)
-              : const SetupScreen(),
-        ),
-      ),
+    return DynamicColorBuilder(
+      builder: (ColorScheme? lightDynamic, ColorScheme? darkDynamic) {
+        return ValueListenableBuilder<bool>(
+          valueListenable: useDynamicColorNotifier,
+          builder: (_, useDynamic, __) {
+            return ValueListenableBuilder<Color>(
+              valueListenable: accentNotifier,
+              builder: (_, accent, __) {
+                return ValueListenableBuilder<ThemeMode>(
+                  valueListenable: themeModeNotifier,
+                  builder: (_, mode, __) {
+                    // ── Schémas de couleur ──────────────────────
+                    final ColorScheme lightScheme = (useDynamic && lightDynamic != null)
+                        ? lightDynamic.harmonized()
+                        : ColorScheme.fromSeed(
+                            seedColor:  accent,
+                            brightness: Brightness.light,
+                          );
+
+                    final ColorScheme darkScheme = (useDynamic && darkDynamic != null)
+                        ? darkDynamic.harmonized()
+                        : ColorScheme.fromSeed(
+                            seedColor:  accent,
+                            brightness: Brightness.dark,
+                          );
+
+                    return MaterialApp(
+                      title: 'LastStats',
+                      debugShowCheckedModeBanner: false,
+                      theme: ThemeData(
+                        colorScheme: lightScheme,
+                        useMaterial3: true,
+                      ),
+                      darkTheme: ThemeData(
+                        colorScheme: darkScheme,
+                        useMaterial3: true,
+                      ),
+                      themeMode: mode,
+                      home: (username.isNotEmpty && apiKey.isNotEmpty)
+                          ? HomeScreen(
+                              username:   username,
+                              apiKey:     apiKey,
+                              startupTab: startupTab,
+                            )
+                          : const SetupScreen(),
+                    );
+                  },
+                );
+              },
+            );
+          },
+        );
+      },
     );
   }
 }

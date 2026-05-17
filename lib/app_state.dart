@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
-// ── Notifiers globaux partagés entre main.dart et home_screen.dart ───────────
-final themeModeNotifier = ValueNotifier<ThemeMode>(ThemeMode.system);
-final accentNotifier    = ValueNotifier<Color>(const Color(0xFF7C3AED));
+// ── Notifiers globaux ────────────────────────────────────────────────────────
+final themeModeNotifier        = ValueNotifier<ThemeMode>(ThemeMode.system);
+final accentNotifier           = ValueNotifier<Color>(const Color(0xFF7C3AED));
+final useDynamicColorNotifier  = ValueNotifier<bool>(false);
+final useNowPlayingColorNotifier = ValueNotifier<bool>(false);
 
 ThemeMode themeFromString(String? s) {
   switch (s) {
