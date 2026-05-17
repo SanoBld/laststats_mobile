@@ -103,7 +103,7 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 // ═══════════════════════════════════════════════════════
-// DASHBOARD
+// DASHBOARD v2 — Podium · Now Playing · Recherche · Partage
 // ═══════════════════════════════════════════════════════
 class _DashboardPage extends StatefulWidget {
   final LastFmService service;
@@ -114,49 +114,48 @@ class _DashboardPage extends StatefulWidget {
   State<_DashboardPage> createState() => _DashboardPageState();
 }
 
-class _DashboardPageState extends State<_DashboardPage> {
+class _DashboardPageState extends State<_DashboardPage>
+    with SingleTickerProviderStateMixin {
+  // ── Data ────────────────────────────────────────────
   Map<String, dynamic>? _userInfo;
-  List<dynamic> _topArtists = [];
-  List<dynamic> _topTracks  = [];
+  List<dynamic> _artists  = [];
+  List<dynamic> _tracks   = [];
+  List<dynamic> _albums   = [];
   Map<String, dynamic>? _nowPlaying;
-  bool _loading = true;
+  bool    _loading = true;
   String? _error;
-  Timer? _npTimer;
+  Timer?  _npTimer;
 
-  String _greeting     = 'Bonjour';
-  bool   _showNowPlay  = true;
-  bool   _showStats    = true;
-  bool   _showArtists  = true;
-  bool   _showTracks   = true;
-  String _artistPeriod = 'overall';
-  String _trackPeriod  = '7day';
+  // ── UI ──────────────────────────────────────────────
+  String _period = 'overall';
+  late final TabController _tabCtrl;
+  bool   _searching   = false;
+  final  _searchCtrl  = TextEditingController();
+  String _searchQuery = '';
 
   @override
   void initState() {
     super.initState();
+    _tabCtrl = TabController(length: 3, vsync: this);
     _loadPrefs().then((_) => _load());
     _npTimer = Timer.periodic(
         const Duration(seconds: 30), (_) => _refreshNowPlaying());
+    _searchCtrl.addListener(
+        () => setState(() => _searchQuery = _searchCtrl.text.toLowerCase()));
   }
 
   @override
   void dispose() {
     _npTimer?.cancel();
+    _tabCtrl.dispose();
+    _searchCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
-    setState(() {
-      _greeting     = prefs.getString('ls_greeting')           ?? 'Bonjour';
-      _showNowPlay  = prefs.getBool('ls_show_nowplay')         ?? true;
-      _showStats    = prefs.getBool('ls_show_stats')           ?? true;
-      _showArtists  = prefs.getBool('ls_show_artists')         ?? true;
-      _showTracks   = prefs.getBool('ls_show_tracks')          ?? true;
-      _artistPeriod = prefs.getString('ls_dash_artist_period') ?? 'overall';
-      _trackPeriod  = prefs.getString('ls_dash_track_period')  ?? '7day';
-    });
+    setState(() => _period = prefs.getString('ls_dash_period') ?? 'overall');
   }
 
   Future<void> _load() async {
@@ -164,15 +163,17 @@ class _DashboardPageState extends State<_DashboardPage> {
     try {
       final results = await Future.wait([
         widget.service.getUserInfo(),
-        widget.service.getTopArtists(period: _artistPeriod, limit: 5),
-        widget.service.getTopTracks(period: _trackPeriod, limit: 5),
+        widget.service.getTopArtists(period: _period, limit: 10),
+        widget.service.getTopTracks(period: _period, limit: 10),
+        widget.service.getTopAlbums(period: _period, limit: 10),
         widget.service.getNowPlaying(),
       ]);
-      final np = results[3] as Map<String, dynamic>?;
+      final np = results[4] as Map<String, dynamic>?;
       setState(() {
         _userInfo   = results[0] as Map<String, dynamic>?;
-        _topArtists = results[1] as List<dynamic>;
-        _topTracks  = results[2] as List<dynamic>;
+        _artists    = results[1] as List<dynamic>;
+        _tracks     = results[2] as List<dynamic>;
+        _albums     = results[3] as List<dynamic>;
         _nowPlaying = np;
         _loading    = false;
       });
@@ -195,7 +196,6 @@ class _DashboardPageState extends State<_DashboardPage> {
     } catch (_) {}
   }
 
-  /// Extrait la couleur dominante de la pochette et l'applique si l'option est activée.
   Future<void> _extractColorFromNowPlaying(Map<String, dynamic> track) async {
     if (!useNowPlayingColorNotifier.value) return;
     final url = _extractImage(track['image']);
@@ -206,20 +206,108 @@ class _DashboardPageState extends State<_DashboardPage> {
         size: const Size(200, 200),
         maximumColorCount: 16,
       );
-      final color = palette.vibrantColor?.color
-          ?? palette.dominantColor?.color;
-      if (color != null && mounted) {
-        accentNotifier.value = color;
-      }
+      final color = palette.vibrantColor?.color ?? palette.dominantColor?.color;
+      if (color != null && mounted) accentNotifier.value = color;
     } catch (_) {}
   }
 
-  String _periodLabel(String p) =>
-      _kPeriods.firstWhere((x) => x.$1 == p, orElse: () => (p, p)).$2;
+  Future<void> _onPeriodChanged(String p) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('ls_dash_period', p);
+    setState(() => _period = p);
+    _load();
+  }
+
+  List<dynamic> _filtered(List<dynamic> list) {
+    if (_searchQuery.isEmpty) return list;
+    return list.where((item) {
+      final name   = (item['name'] ?? '').toString().toLowerCase();
+      final artist = (item['artist'] is Map
+              ? item['artist']['name']
+              : item['artist'] ?? '')
+          .toString().toLowerCase();
+      return name.contains(_searchQuery) || artist.contains(_searchQuery);
+    }).toList();
+  }
+
+  void _showShare() {
+    if (_userInfo == null) return;
+    final name      = (_userInfo!['name'] ?? widget.username).toString();
+    final scrobbles = (_userInfo!['playcount'] ?? '0').toString();
+    final periodLabel = _kPeriods
+        .firstWhere((p) => p.$1 == _period, orElse: () => (_period, _period)).$2;
+
+    final sb = StringBuffer();
+    sb.writeln('🎧 LastStats — @$name');
+    sb.writeln('📊 ${_formatNumber(int.tryParse(scrobbles) ?? 0)} scrobbles\n');
+    sb.writeln('🎙️ Top Artistes ($periodLabel) :');
+    for (var i = 0; i < _artists.take(5).length; i++) {
+      sb.writeln('  ${i + 1}. ${_artists[i]['name']} — ${_artists[i]['playcount']} écoutes');
+    }
+    sb.writeln('\n🎵 Top Titres ($periodLabel) :');
+    for (var i = 0; i < _tracks.take(5).length; i++) {
+      final t = _tracks[i];
+      sb.writeln('  ${i + 1}. ${t['name']} (${t['artist']?['name'] ?? ''}) — ${t['playcount']} écoutes');
+    }
+    sb.writeln('\n✨ Via LastStats · sanobld.github.io/LastStats');
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        final s = Theme.of(ctx).colorScheme;
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Partager mes stats',
+                  style: Theme.of(ctx).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 16),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(color: s.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(12)),
+                child: Text(sb.toString(),
+                    style: Theme.of(ctx).textTheme.bodySmall?.copyWith(height: 1.6)),
+              ),
+              const SizedBox(height: 16),
+              Row(children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () { Navigator.pop(ctx);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Résumé copié !'))); },
+                    icon: const Icon(Icons.copy_rounded),
+                    label: const Text('Copier'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: () async {
+                      final uri = Uri.parse('https://sanobld.github.io/LastStats');
+                      if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      if (ctx.mounted) Navigator.pop(ctx);
+                    },
+                    icon: const Icon(Icons.open_in_new_rounded),
+                    label: const Text('Version web'),
+                  ),
+                ),
+              ]),
+            ]),
+          ),
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final text   = Theme.of(context).textTheme;
 
     if (_loading) return const Center(child: CircularProgressIndicator());
     if (_error != null) return _ErrorView(message: _error!, onRetry: _load);
@@ -229,18 +317,60 @@ class _DashboardPageState extends State<_DashboardPage> {
     final realName   = (info['realname']  ?? '').toString();
     final country    = (info['country']   ?? '').toString();
     final scrobbles  = (info['playcount'] ?? '0').toString();
-    final regRaw     = info['registered'];
-    final registered = _parseRegistered(regRaw);
+    final registered = _parseRegistered(info['registered']);
     final avatarUrl  = _extractImage(info['image']);
 
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: CustomScrollView(
-        slivers: [
+    return Scaffold(
+      body: NestedScrollView(
+        headerSliverBuilder: (ctx, innerScrolled) => [
+          // ── AppBar ────────────────────────────────
           SliverAppBar(
-            expandedHeight: 200,
+            expandedHeight: 210,
             pinned: true,
+            forceElevated: innerScrolled,
+            actions: [
+              if (_searching)
+                IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () => setState(() { _searching = false; _searchCtrl.clear(); }),
+                )
+              else ...[
+                IconButton(
+                  icon: const Icon(Icons.search_rounded),
+                  tooltip: 'Rechercher',
+                  onPressed: () => setState(() => _searching = true),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.ios_share_rounded),
+                  tooltip: 'Partager',
+                  onPressed: _showShare,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.refresh_rounded),
+                  tooltip: 'Rafraîchir',
+                  onPressed: _load,
+                ),
+              ],
+            ],
             flexibleSpace: FlexibleSpaceBar(
+              titlePadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+              title: _searching
+                  ? SizedBox(
+                      height: 36,
+                      child: TextField(
+                        controller: _searchCtrl,
+                        autofocus: true,
+                        style: const TextStyle(fontSize: 13),
+                        decoration: InputDecoration(
+                          hintText: 'Artiste, titre, album…',
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(20)),
+                          filled: true, isDense: true,
+                        ),
+                      ),
+                    )
+                  : Text('@$name',
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
               background: Container(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
@@ -251,241 +381,329 @@ class _DashboardPageState extends State<_DashboardPage> {
                 ),
                 child: SafeArea(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '$_greeting, $name 👋',
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(
-                                color: scheme.primary,
-                                fontWeight: FontWeight.w700,
-                              ),
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 36,
-                              backgroundColor:
-                                  scheme.primary.withValues(alpha: 0.2),
-                              backgroundImage: avatarUrl.isNotEmpty
-                                  ? NetworkImage(avatarUrl)
-                                  : null,
-                              child: avatarUrl.isEmpty
-                                  ? Icon(Icons.person_rounded,
-                                      size: 36,
-                                      color: scheme.onPrimaryContainer)
-                                  : null,
+                    padding: const EdgeInsets.fromLTRB(20, 12, 100, 50),
+                    child: Row(children: [
+                      CircleAvatar(
+                        radius: 38,
+                        backgroundColor: scheme.primary.withValues(alpha: 0.2),
+                        backgroundImage: avatarUrl.isNotEmpty ? NetworkImage(avatarUrl) : null,
+                        child: avatarUrl.isEmpty
+                            ? Icon(Icons.person_rounded, size: 38, color: scheme.onPrimaryContainer)
+                            : null,
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
+                              style: text.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
+                          if (realName.isNotEmpty)
+                            Text(realName, style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                          if (country.isNotEmpty && country != 'None')
+                            Row(children: [
+                              Icon(Icons.location_on_outlined, size: 12, color: scheme.onSurfaceVariant),
+                              const SizedBox(width: 2),
+                              Text(country, style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                            ]),
+                          if (registered.isNotEmpty)
+                            Row(children: [
+                              Icon(Icons.calendar_today_outlined, size: 12, color: scheme.onSurfaceVariant),
+                              const SizedBox(width: 2),
+                              Text('Depuis $registered',
+                                  style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                            ]),
+                          const SizedBox(height: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: scheme.primary,
+                              borderRadius: BorderRadius.circular(20),
                             ),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(name,
-                                      style: Theme.of(context).textTheme
-                                          .titleLarge
-                                          ?.copyWith(fontWeight: FontWeight.w800)),
-                                  if (realName.isNotEmpty)
-                                    Text(realName,
-                                        style: Theme.of(context).textTheme
-                                            .bodyMedium
-                                            ?.copyWith(color: scheme.onSurfaceVariant)),
-                                  if (country.isNotEmpty && country != 'None')
-                                    Text(country,
-                                        style: Theme.of(context).textTheme
-                                            .bodySmall
-                                            ?.copyWith(color: scheme.onSurfaceVariant)),
-                                ],
-                              ),
+                            child: Text(
+                              '${_formatNumber(int.tryParse(scrobbles) ?? 0)} scrobbles',
+                              style: text.labelSmall?.copyWith(
+                                  color: scheme.onPrimary, fontWeight: FontWeight.w700),
                             ),
-                          ],
-                        ),
-                      ],
-                    ),
+                          ),
+                        ]),
+                      ),
+                    ]),
                   ),
                 ),
               ),
-              title: Text('@$name',
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
             ),
           ),
 
-          SliverPadding(
-            padding: const EdgeInsets.all(16),
-            sliver: SliverList(
-              delegate: SliverChildListDelegate([
-
-                // ── Now Playing ──
-                if (_showNowPlay && _nowPlaying != null) ...[
-                  _NowPlayingCard(track: _nowPlaying!),
-                  const SizedBox(height: 16),
-                ],
-
-                // ── Stats ──
-                if (_showStats) ...[
-                  _StatCard(
-                    icon: Icons.headphones_rounded,
-                    value: _formatNumber(int.tryParse(scrobbles) ?? 0),
-                    label: 'Scrobbles au total',
-                    sub: registered.isNotEmpty
-                        ? 'Membre depuis $registered'
-                        : null,
-                  ),
-                  const SizedBox(height: 20),
-                ],
-
-                // ── Top Artistes ──
-                if (_showArtists) ...[
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      _SectionHeader(
-                          title: 'Top Artistes', icon: Icons.mic_rounded),
-                      _PeriodBadge(
-                        label: _periodLabel(_artistPeriod),
-                        onTap: () => _showPeriodSheet(
-                          title: 'Période — Artistes',
-                          current: _artistPeriod,
-                          prefKey: 'ls_dash_artist_period',
-                          onChanged: (p) {
-                            setState(() => _artistPeriod = p);
-                            _load();
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  ..._topArtists.asMap().entries.map((e) => _ItemTile(
-                        name: (e.value['name'] ?? '').toString(),
-                        sub:  '${_formatNumber(int.tryParse((e.value['playcount'] ?? '0').toString()) ?? 0)} écoutes',
-                        imageUrl: _extractImage(e.value['image']),
-                        imageFuture: ImageService.resolveArtist(
-                          (e.value['name'] ?? '').toString(),
-                          lastfmUrl: _extractImage(e.value['image']),
-                        ),
-                        rank: '${e.key + 1}',
-                      )),
-                  const SizedBox(height: 20),
-                ],
-
-                // ── Top Titres ──
-                if (_showTracks) ...[
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      _SectionHeader(
-                          title: 'Top Titres', icon: Icons.music_note_rounded),
-                      _PeriodBadge(
-                        label: _periodLabel(_trackPeriod),
-                        onTap: () => _showPeriodSheet(
-                          title: 'Période — Titres',
-                          current: _trackPeriod,
-                          prefKey: 'ls_dash_track_period',
-                          onChanged: (p) {
-                            setState(() => _trackPeriod = p);
-                            _load();
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  ..._topTracks.asMap().entries.map((e) {
-                    final artist = (e.value['artist']?['name'] ?? '').toString();
-                    final trackName = (e.value['name'] ?? '').toString();
-                    return _ItemTile(
-                      name:  trackName,
-                      sub:   artist,
-                      imageUrl: _extractImage(e.value['image']),
-                      imageFuture: ImageService.resolveTrack(
-                        trackName, artist,
-                        lastfmUrl: _extractImage(e.value['image']),
-                      ),
-                      rank:  '${e.key + 1}',
-                      plays: _formatNumber(
-                          int.tryParse((e.value['playcount'] ?? '0').toString()) ?? 0),
-                    );
-                  }),
-                  const SizedBox(height: 20),
-                ],
-              ]),
-            ),
+          // ── Période sticky ──────────────────────────
+          SliverPersistentHeader(
+            pinned: true,
+            delegate: _PeriodHeaderDelegate(period: _period, onChanged: _onPeriodChanged),
           ),
         ],
+
+        body: Column(children: [
+          if (_nowPlaying != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+              child: _NowPlayingCard(track: _nowPlaying!),
+            ),
+          TabBar(
+            controller: _tabCtrl,
+            tabs: const [Tab(text: 'Artistes'), Tab(text: 'Titres'), Tab(text: 'Albums')],
+          ),
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: _load,
+              child: TabBarView(
+                controller: _tabCtrl,
+                children: [
+                  _DashTab(items: _filtered(_artists), type: 'artists'),
+                  _DashTab(items: _filtered(_tracks),  type: 'tracks'),
+                  _DashTab(items: _filtered(_albums),  type: 'albums'),
+                ],
+              ),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+// ─── Barre de période sticky ───────────────────────────────────────
+class _PeriodHeaderDelegate extends SliverPersistentHeaderDelegate {
+  final String period;
+  final Future<void> Function(String) onChanged;
+  const _PeriodHeaderDelegate({required this.period, required this.onChanged});
+
+  @override double get minExtent => 48;
+  @override double get maxExtent => 48;
+
+  @override
+  Widget build(BuildContext ctx, double shrink, bool overlaps) {
+    final scheme = Theme.of(ctx).colorScheme;
+    return Material(
+      elevation: overlaps ? 1 : 0,
+      color: scheme.surface,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        children: _kPeriods.map((p) {
+          final sel = p.$1 == period;
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: FilterChip(
+              label: Text(p.$2), selected: sel, showCheckmark: false,
+              onSelected: (_) { if (!sel) onChanged(p.$1); },
+            ),
+          );
+        }).toList(),
       ),
     );
   }
 
-  void _showPeriodSheet({
-    required String title,
-    required String current,
-    required String prefKey,
-    required void Function(String) onChanged,
-  }) {
-    showModalBottomSheet<void>(
-      context: context,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 12),
+  @override
+  bool shouldRebuild(_PeriodHeaderDelegate old) => old.period != period;
+}
+
+// ─── Tab dashboard : podium + liste ───────────────────────────────
+class _DashTab extends StatelessWidget {
+  final List<dynamic> items;
+  final String type;
+  const _DashTab({required this.items, required this.type});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    if (items.isEmpty) {
+      return Center(
+          child: Text('Aucun résultat',
+              style: TextStyle(color: scheme.onSurfaceVariant)));
+    }
+    final top3 = items.take(3).toList();
+    final rest = items.skip(3).take(7).toList();
+
+    return ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        _Podium(items: top3, type: type),
+        if (rest.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          ...rest.asMap().entries.map((e) {
+            final item      = e.value;
+            final name      = (item['name'] ?? '').toString();
+            final plays     = _formatNumber(
+                int.tryParse((item['playcount'] ?? '0').toString()) ?? 0);
+            final artistStr = (item['artist'] is Map
+                    ? item['artist']['name']
+                    : item['artist'] ?? '')
+                .toString();
+            final sub = type == 'artists' ? '$plays écoutes' : artistStr;
+
+            Future<String> resolver() {
+              switch (type) {
+                case 'artists': return ImageService.resolveArtist(name, lastfmUrl: _extractImage(item['image']));
+                case 'albums':  return ImageService.resolveAlbum(name, artistStr, lastfmUrl: _extractImage(item['image']));
+                default:        return ImageService.resolveTrack(name, artistStr, lastfmUrl: _extractImage(item['image']));
+              }
+            }
+
+            return _ItemTile(
+              name: name, sub: sub,
+              imageUrl: _extractImage(item['image']),
+              imageFuture: resolver(),
+              rank: '${e.key + 4}',
+              plays: type != 'artists' ? plays : null,
+            );
+          }),
+        ],
+        const SizedBox(height: 8),
+      ],
+    );
+  }
+}
+
+// ─── Podium Top 3 ─────────────────────────────────────────────────
+class _Podium extends StatelessWidget {
+  final List<dynamic> items;
+  final String type;
+  const _Podium({required this.items, required this.type});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text   = Theme.of(context).textTheme;
+    if (items.isEmpty) return const SizedBox.shrink();
+
+    final order = items.length == 1 ? [0]
+        : items.length == 2 ? [1, 0]
+        : [1, 0, 2];
+
+    Widget slot(int rank0) {
+      final item      = items[rank0];
+      final name      = (item['name'] ?? '').toString();
+      final plays     = _formatNumber(int.tryParse((item['playcount'] ?? '0').toString()) ?? 0);
+      final rawUrl    = _extractImage(item['image']);
+      final rank      = rank0 + 1;
+      final isFirst   = rank == 1;
+      final imgSize   = isFirst ? 72.0 : 56.0;
+      final baseH     = rank == 1 ? 68.0 : rank == 2 ? 50.0 : 34.0;
+      final artistStr = (item['artist'] is Map ? item['artist']['name'] : item['artist'] ?? '').toString();
+
+      Future<String> resolver() {
+        switch (type) {
+          case 'artists': return ImageService.resolveArtist(name, lastfmUrl: rawUrl);
+          case 'albums':  return ImageService.resolveAlbum(name, artistStr, lastfmUrl: rawUrl);
+          default:        return ImageService.resolveTrack(name, artistStr, lastfmUrl: rawUrl);
+        }
+      }
+
+      final medalColor = rank == 1 ? const Color(0xFFFFD700)
+          : rank == 2 ? const Color(0xFFC0C0C0)
+          : const Color(0xFFCD7F32);
+
+      return Expanded(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Column(mainAxisAlignment: MainAxisAlignment.end, children: [
             Container(
-                width: 36, height: 4,
-                decoration: BoxDecoration(
-                    color: Theme.of(ctx)
-                        .colorScheme
-                        .onSurfaceVariant
-                        .withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(2))),
-            const SizedBox(height: 12),
-            Text(title,
-                style: Theme.of(ctx)
-                    .textTheme
-                    .titleMedium
-                    ?.copyWith(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 8),
-            ..._kPeriods.map((p) => ListTile(
-                  title: Text(p.$2),
-                  trailing: current == p.$1
-                      ? Icon(Icons.check_rounded,
-                          color: Theme.of(ctx).colorScheme.primary)
-                      : null,
-                  onTap: () async {
-                    final prefs = await SharedPreferences.getInstance();
-                    await prefs.setString(prefKey, p.$1);
-                    onChanged(p.$1);
-                    if (ctx.mounted) Navigator.pop(ctx);
-                  },
-                )),
-            const SizedBox(height: 8),
-          ],
+              width: 22, height: 22,
+              decoration: BoxDecoration(color: medalColor, shape: BoxShape.circle),
+              child: Center(child: Text('$rank',
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: Colors.white))),
+            ),
+            const SizedBox(height: 6),
+            _SmartImage(
+              size: imgSize,
+              borderRadius: type == 'artists' ? imgSize / 2 : 10,
+              initialUrl: rawUrl,
+              resolver: resolver,
+            ),
+            const SizedBox(height: 5),
+            Text(name, maxLines: 2, textAlign: TextAlign.center,
+                overflow: TextOverflow.ellipsis,
+                style: text.bodySmall?.copyWith(fontWeight: FontWeight.w700, fontSize: 11)),
+            if (type != 'artists' && artistStr.isNotEmpty)
+              Text(artistStr, maxLines: 1, textAlign: TextAlign.center,
+                  overflow: TextOverflow.ellipsis,
+                  style: text.labelSmall?.copyWith(fontSize: 9, color: scheme.onSurfaceVariant)),
+            Text(plays, style: text.labelSmall?.copyWith(
+                color: scheme.primary, fontWeight: FontWeight.w700, fontSize: 10)),
+            const SizedBox(height: 4),
+            Container(
+              height: baseH,
+              decoration: BoxDecoration(
+                color: isFirst ? scheme.primaryContainer : scheme.surfaceContainerHighest,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+              ),
+            ),
+          ]),
+        ),
+      );
+    }
+
+    return Card(
+      elevation: 0,
+      color: scheme.surfaceContainerLowest,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      clipBehavior: Clip.hardEdge,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(6, 16, 6, 0),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: order.map(slot).toList(),
         ),
       ),
     );
   }
 }
 
+
 // ═══════════════════════════════════════════════════════
-// NOW PLAYING CARD
+// NOW PLAYING CARD — barres animées
 // ═══════════════════════════════════════════════════════
-class _NowPlayingCard extends StatelessWidget {
+class _NowPlayingCard extends StatefulWidget {
   final Map<String, dynamic> track;
   const _NowPlayingCard({required this.track});
+
+  @override
+  State<_NowPlayingCard> createState() => _NowPlayingCardState();
+}
+
+class _NowPlayingCardState extends State<_NowPlayingCard>
+    with TickerProviderStateMixin {
+  late final List<AnimationController> _ctrlList;
+  late final List<Animation<double>>   _anims;
+
+  static const _barCount = 4;
+  static const _heights  = [0.6, 1.0, 0.7, 0.85];
+  static const _durations = [420, 560, 480, 510];
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrlList = List.generate(_barCount, (i) => AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: _durations[i]),
+    )..repeat(reverse: true));
+    _anims = List.generate(_barCount, (i) =>
+        Tween<double>(begin: 0.25, end: _heights[i]).animate(
+            CurvedAnimation(parent: _ctrlList[i], curve: Curves.easeInOut)));
+  }
+
+  @override
+  void dispose() {
+    for (final c in _ctrlList) c.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final text   = Theme.of(context).textTheme;
-    final title  = (track['name']             ?? '').toString();
-    final artist = (track['artist']?['#text'] ?? '').toString();
-    final rawUrl = _extractImage(track['image']);
+    final title  = (widget.track['name']             ?? '').toString();
+    final artist = (widget.track['artist']?['#text'] ?? '').toString();
+    final rawUrl = _extractImage(widget.track['image']);
 
     return Card(
       elevation: 0,
@@ -493,57 +711,59 @@ class _NowPlayingCard extends StatelessWidget {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(14),
-        child: Row(
-          children: [
-            _SmartImage(
-              size: 56,
-              borderRadius: 10,
-              initialUrl: rawUrl,
-              resolver: () => ImageService.resolveTrack(title, artist,
-                  lastfmUrl: rawUrl.isNotEmpty ? rawUrl : null),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(children: [
-                    Container(
-                      width: 8, height: 8,
-                      decoration: BoxDecoration(
-                        color: scheme.secondary,
-                        shape: BoxShape.circle,
+        child: Row(children: [
+          _SmartImage(
+            size: 56, borderRadius: 10,
+            initialUrl: rawUrl,
+            resolver: () => ImageService.resolveTrack(title, artist,
+                lastfmUrl: rawUrl.isNotEmpty ? rawUrl : null),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                // ── Barres animées ──
+                SizedBox(
+                  width: 20, height: 14,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: List.generate(_barCount, (i) => Padding(
+                      padding: const EdgeInsets.only(right: 2),
+                      child: AnimatedBuilder(
+                        animation: _anims[i],
+                        builder: (_, __) => Container(
+                          width: 3,
+                          height: 14 * _anims[i].value,
+                          decoration: BoxDecoration(
+                            color: scheme.secondary,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 6),
-                    Text('EN COURS',
-                        style: text.labelSmall?.copyWith(
-                          color: scheme.secondary,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 1.2,
-                        )),
-                  ]),
-                  const SizedBox(height: 2),
-                  Text(title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: text.bodyMedium
-                          ?.copyWith(fontWeight: FontWeight.w700)),
-                  Text(artist,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: text.bodySmall?.copyWith(
-                          color: scheme.onSecondaryContainer
-                              .withValues(alpha: 0.75))),
-                ],
-              ),
-            ),
-          ],
-        ),
+                    )),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text('EN COURS',
+                    style: text.labelSmall?.copyWith(
+                        color: scheme.secondary,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.2)),
+              ]),
+              const SizedBox(height: 2),
+              Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w700)),
+              Text(artist, maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: text.bodySmall?.copyWith(
+                      color: scheme.onSecondaryContainer.withValues(alpha: 0.75))),
+            ]),
+          ),
+        ]),
       ),
     );
   }
 }
+
 
 // ═══════════════════════════════════════════════════════
 // CLASSEMENTS (Artists + Albums + Tracks)
@@ -2476,6 +2696,113 @@ class _SettingsPageState extends State<_SettingsPage> {
                       ? const Text("À jour")
                       : Text('v${_updateInfo!.version} disponible')),
               onTap: _checkingUpdate ? null : () => _checkUpdate(),
+            ),
+          ]),
+
+          const SizedBox(height: 16),
+
+          // ════════════════════
+          // TECHNIQUE
+          // ════════════════════
+          _SettingsSection(label: 'Technique', children: [
+
+            // Cache images
+            ListTile(
+              leading: Icon(Icons.image_outlined, color: scheme.primary),
+              title: const Text('Cache images'),
+              subtitle: Text('${ImageService.cacheSize} entrées en mémoire'),
+              trailing: TextButton(
+                onPressed: () {
+                  ImageService.clearCache();
+                  setState(() {});
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Cache images vidé.')));
+                },
+                child: const Text('Vider'),
+              ),
+            ),
+
+            const Divider(height: 1, indent: 16, endIndent: 16),
+
+            // Exporter données
+            ListTile(
+              leading: Icon(Icons.download_rounded, color: scheme.primary),
+              title: const Text('Exporter mes préférences'),
+              subtitle: const Text('Copie un résumé JSON de tes réglages'),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () async {
+                final prefs = await SharedPreferences.getInstance();
+                final keys = prefs.getKeys().where((k) => k.startsWith('ls_')).toList()..sort();
+                final map = { for (final k in keys) k: prefs.get(k) };
+                final json = map.entries.map((e) => '  "${e.key}": ${e.value is String ? '"${e.value}"' : e.value}').join(',\n');
+                final out = '{\n$json\n}';
+                // ignore: use_build_context_synchronously
+                showDialog<void>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Préférences LastStats'),
+                    content: SingleChildScrollView(
+                      child: SelectableText(out,
+                          style: Theme.of(ctx).textTheme.bodySmall
+                              ?.copyWith(fontFamily: 'monospace')),
+                    ),
+                    actions: [
+                      TextButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          child: const Text('Fermer')),
+                    ],
+                  ),
+                );
+              },
+            ),
+
+            const Divider(height: 1, indent: 16, endIndent: 16),
+
+            // Réinitialiser préférences
+            ListTile(
+              leading: Icon(Icons.delete_sweep_rounded, color: scheme.error),
+              title: Text('Réinitialiser les préférences',
+                  style: TextStyle(color: scheme.error)),
+              subtitle: const Text('Remet tous les réglages par défaut'),
+              onTap: () async {
+                final ok = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Réinitialiser ?'),
+                    content: const Text(
+                        'Tous tes réglages (thème, accent, dashbord…) seront remis à zéro. Ton compte ne sera pas déconnecté.'),
+                    actions: [
+                      TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: const Text('Annuler')),
+                      FilledButton(
+                          style: FilledButton.styleFrom(
+                              backgroundColor: scheme.error,
+                              foregroundColor: scheme.onError),
+                          onPressed: () => Navigator.pop(ctx, true),
+                          child: const Text('Réinitialiser')),
+                    ],
+                  ),
+                );
+                if (ok == true) {
+                  final prefs = await SharedPreferences.getInstance();
+                  final toRemove = prefs.getKeys()
+                      .where((k) => k.startsWith('ls_') && k != 'ls_username' && k != 'ls_apikey')
+                      .toList();
+                  for (final k in toRemove) await prefs.remove(k);
+                  ImageService.clearCache();
+                  // Réappliquer les valeurs par défaut
+                  themeModeNotifier.value        = ThemeMode.system;
+                  accentNotifier.value           = const Color(0xFF7C3AED);
+                  useDynamicColorNotifier.value  = false;
+                  useNowPlayingColorNotifier.value = false;
+                  if (mounted) {
+                    setState(() {});
+                    ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Préférences réinitialisées.')));
+                  }
+                }
+              },
             ),
           ]),
 

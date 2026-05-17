@@ -19,6 +19,12 @@ class ImageService {
   /// Cache global partagé pour toute la session.
   static final Map<String, String> _cache = {};
 
+  /// Nombre d'entrées en cache.
+  static int get cacheSize => _cache.length;
+
+  /// Vide le cache d'images.
+  static void clearCache() => _cache.clear();
+
   // ──────────────────────────────────────────────────────────────────────
   //  Public API
   // ──────────────────────────────────────────────────────────────────────
