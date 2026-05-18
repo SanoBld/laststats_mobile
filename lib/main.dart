@@ -43,13 +43,13 @@ class LastStatsApp extends StatelessWidget {
       builder: (ColorScheme? lightDynamic, ColorScheme? darkDynamic) {
         return ValueListenableBuilder<bool>(
           valueListenable: useDynamicColorNotifier,
-          builder: (_, useDynamic, _) {
+          builder: (_, useDynamic, __) {
             return ValueListenableBuilder<Color>(
               valueListenable: accentNotifier,
-              builder: (_, accent, _) {
+              builder: (_, accent, __) {
                 return ValueListenableBuilder<ThemeMode>(
                   valueListenable: themeModeNotifier,
-                  builder: (_, mode, _) {
+                  builder: (_, mode, __) {
                     // ── Schémas de couleur ──────────────────────
                     final ColorScheme lightScheme = (useDynamic && lightDynamic != null)
                         ? lightDynamic.harmonized()

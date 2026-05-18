@@ -105,7 +105,6 @@ class LastFmService {
     return (d['recenttracks'] as Map<String, dynamic>?) ?? {};
   }
 
-  /// Returns the currently playing track, or null if nothing is playing.
   Future<Map<String, dynamic>?> getNowPlaying() async {
     try {
       final d      = await getRecentTracks(limit: 1);
@@ -118,14 +117,13 @@ class LastFmService {
     }
   }
 
-  // ── Monthly scrobble counts (12 parallel requests) ──────
+  // ── Monthly scrobble counts ──────────────────────────────
   Future<Map<String, int>> getMonthlyScrobbles({int months = 12}) async {
     final now   = DateTime.now();
     final keys  = <String>[];
     final futs  = <Future>[];
 
     for (var i = months - 1; i >= 0; i--) {
-      // Dart handles month underflow correctly (e.g. month 0 → December)
       final from = DateTime(now.year, now.month - i,     1);
       final to   = DateTime(now.year, now.month - i + 1, 1);
       keys.add('${from.year}-${from.month.toString().padLeft(2, '0')}');
@@ -160,18 +158,112 @@ class LastFmService {
     return _asList(d['lovedtracks']?['track']);
   }
 
-  // ── Artist info (Mainstream vs Gems) ────────────────────
-  Future<int?> getArtistListeners(String artist) async {
+  // ── Artist info (global + user context) ─────────────────
+  Future<Map<String, dynamic>?> getArtistInfo(String artist) async {
     try {
       final d = await _call({
         'method':   'artist.getInfo',
         'artist':   artist,
         'username': username,
+        'lang':     'fr',
+        'autocorrect': '1',
       });
-      return int.tryParse(
-          d['artist']?['stats']?['listeners']?.toString() ?? '');
+      return d['artist'] as Map<String, dynamic>?;
     } catch (_) {
       return null;
     }
+  }
+
+  Future<int?> getArtistListeners(String artist) async {
+    final info = await getArtistInfo(artist);
+    return int.tryParse(info?['stats']?['listeners']?.toString() ?? '');
+  }
+
+  // ── Artist top tracks (global) ───────────────────────────
+  Future<List<dynamic>> getArtistTopTracks(String artist, {int limit = 10}) async {
+    try {
+      final d = await _call({
+        'method':      'artist.getTopTracks',
+        'artist':      artist,
+        'limit':       '$limit',
+        'autocorrect': '1',
+      });
+      return _asList(d['toptracks']?['track']);
+    } catch (_) {
+      return [];
+    }
+  }
+
+  // ── Artist top albums (global) ───────────────────────────
+  Future<List<dynamic>> getArtistTopAlbums(String artist, {int limit = 10}) async {
+    try {
+      final d = await _call({
+        'method':      'artist.getTopAlbums',
+        'artist':      artist,
+        'limit':       '$limit',
+        'autocorrect': '1',
+      });
+      return _asList(d['topalbums']?['album']);
+    } catch (_) {
+      return [];
+    }
+  }
+
+  // ── Album info (global + user context) ──────────────────
+  Future<Map<String, dynamic>?> getAlbumInfo(String album, String artist) async {
+    try {
+      final d = await _call({
+        'method':   'album.getInfo',
+        'album':    album,
+        'artist':   artist,
+        'username': username,
+        'lang':     'fr',
+        'autocorrect': '1',
+      });
+      return d['album'] as Map<String, dynamic>?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ── Track info (global + user context) ──────────────────
+  Future<Map<String, dynamic>?> getTrackInfo(String track, String artist) async {
+    try {
+      final d = await _call({
+        'method':   'track.getInfo',
+        'track':    track,
+        'artist':   artist,
+        'username': username,
+        'autocorrect': '1',
+      });
+      return d['track'] as Map<String, dynamic>?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ── User rank for an item over a period ─────────────────
+  /// Returns (rank, playcount) for an artist/album/track in user's top-200.
+  Future<({int rank, int plays})> getUserItemStats({
+    required String type,   // 'artists' | 'albums' | 'tracks'
+    required String name,
+    String artistName = '',
+    String period    = 'overall',
+  }) async {
+    final List<dynamic> items;
+    if (type == 'artists')     items = await getTopArtists(period: period, limit: 200);
+    else if (type == 'albums') items = await getTopAlbums(period: period,  limit: 200);
+    else                       items = await getTopTracks(period: period,   limit: 200);
+
+    for (var i = 0; i < items.length; i++) {
+      final n = (items[i]['name'] ?? '').toString();
+      final a = type != 'artists' ? (items[i]['artist']?['name'] ?? '').toString() : '';
+      final match = n == name && (type == 'artists' || a == artistName);
+      if (match) {
+        final plays = int.tryParse((items[i]['playcount'] ?? '0').toString()) ?? 0;
+        return (rank: i + 1, plays: plays);
+      }
+    }
+    return (rank: -1, plays: 0);
   }
 }
