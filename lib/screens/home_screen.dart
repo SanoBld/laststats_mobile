@@ -2870,7 +2870,7 @@ class _SettingsPageState extends State<_SettingsPage> {
                   ),
                   const SizedBox(width: 8),
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('Image de secours', style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                    Text('Image par défaut', style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
                     Text('Affichée si aucune musique n\'est en cours.',
                         style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
                   ])),
@@ -2883,7 +2883,7 @@ class _SettingsPageState extends State<_SettingsPage> {
                     keyboardType: TextInputType.url,
                     textInputAction: TextInputAction.done,
                     decoration: InputDecoration(
-                      labelText: 'URL de l\'image de secours',
+                      labelText: 'URL de l\'image par défaut',
                       hintText: 'https://exemple.com/image.jpg',
                       prefixIcon: const Icon(Icons.image_outlined),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),

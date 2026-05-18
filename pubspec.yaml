@@ -26,7 +26,7 @@ dev_dependencies:
 # ── Icône de l'app ─────────────────────────────────────
 flutter_launcher_icons:
   android: true
-  ios: false
+  ios: true
   image_path: "assets/images/icon-512.png"
   min_sdk_android: 21
   adaptive_icon_background: "#1558D6"   # bleu de fond du logo
@@ -34,7 +34,9 @@ flutter_launcher_icons:
   web:
     generate: false
   windows:
-    generate: false
+    generate: true
+    image_path: "assets/images/icon-512.png"
+    icon_size: 48
   macos:
     generate: false
 

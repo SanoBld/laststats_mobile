@@ -109,7 +109,10 @@ jobs:
           cache: true
 
       - run: flutter pub get
-      
+
+      - name: Generate launcher icons
+        run: dart run flutter_launcher_icons
+
       - name: Build APK avec Version Dynamique
         shell: bash
         run: |
