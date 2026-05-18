@@ -21,11 +21,14 @@ jobs:
 
       - run: flutter pub get
 
-      - name: Build Windows avec Version Dynamique
+      - name: Generate launcher icons
+        run: dart run flutter_launcher_icons
+
+      - name: Build Windows
         shell: bash
         run: |
-          VERSION=$(grep 'version:' pubspec.yaml | sed 's/version: //g' | cut -d'+' -f1)
-          flutter build windows --release --dart-define=APP_VERSION="$VERSION+${{ github.run_number }}"
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: *//' | cut -d'+' -f1)
+          flutter build windows --release --build-name="$VERSION" --build-number=${{ github.run_number }}
 
       - name: Upload Windows App
         uses: actions/upload-artifact@v4
@@ -47,11 +50,14 @@ jobs:
 
       - run: flutter pub get
 
-      - name: Build macOS avec Version Dynamique
+      - name: Generate launcher icons
+        run: dart run flutter_launcher_icons
+
+      - name: Build macOS
         shell: bash
         run: |
-          VERSION=$(grep 'version:' pubspec.yaml | sed 's/version: //g' | cut -d'+' -f1)
-          flutter build macos --release --dart-define=APP_VERSION="$VERSION+${{ github.run_number }}"
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: *//' | cut -d'+' -f1)
+          flutter build macos --release --build-name="$VERSION" --build-number=${{ github.run_number }}
 
       - name: Upload macOS App
         uses: actions/upload-artifact@v4
@@ -78,11 +84,14 @@ jobs:
 
       - run: flutter pub get
 
-      - name: Build Linux avec Version Dynamique
+      - name: Generate launcher icons
+        run: dart run flutter_launcher_icons
+
+      - name: Build Linux
         shell: bash
         run: |
-          VERSION=$(grep 'version:' pubspec.yaml | sed 's/version: //g' | cut -d'+' -f1)
-          flutter build linux --release --dart-define=APP_VERSION="$VERSION+${{ github.run_number }}"
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: *//' | cut -d'+' -f1)
+          flutter build linux --release --build-name="$VERSION" --build-number=${{ github.run_number }}
 
       - name: Upload Linux App
         uses: actions/upload-artifact@v4
@@ -113,11 +122,11 @@ jobs:
       - name: Generate launcher icons
         run: dart run flutter_launcher_icons
 
-      - name: Build APK avec Version Dynamique
+      - name: Build APK
         shell: bash
         run: |
-          VERSION=$(grep 'version:' pubspec.yaml | sed 's/version: //g' | cut -d'+' -f1)
-          flutter build apk --release --dart-define=APP_VERSION="$VERSION+${{ github.run_number }}"
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: *//' | cut -d'+' -f1)
+          flutter build apk --release --build-name="$VERSION" --build-number=${{ github.run_number }}
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -139,11 +148,14 @@ jobs:
 
       - run: flutter pub get
 
-      - name: Build Web avec Version Dynamique
+      - name: Generate launcher icons
+        run: dart run flutter_launcher_icons
+
+      - name: Build Web
         shell: bash
         run: |
-          VERSION=$(grep 'version:' pubspec.yaml | sed 's/version: //g' | cut -d'+' -f1)
-          flutter build web --release --dart-define=APP_VERSION="$VERSION+${{ github.run_number }}"
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: *//' | cut -d'+' -f1)
+          flutter build web --release --build-name="$VERSION" --build-number=${{ github.run_number }}
 
       - name: Upload Web App
         uses: actions/upload-artifact@v4

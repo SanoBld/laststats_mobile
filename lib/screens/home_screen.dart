@@ -96,14 +96,26 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final pages = [
+      _DashboardPage(service: _service, username: widget.username),
+      _RankingsPage(service: _service),
+      _ChartsPage(service: _service),
+      _HistoryPage(service: _service),
+      _SettingsPage(username: widget.username),
+    ];
+
     return Scaffold(
-      body: IndexedStack(index: _idx, children: [
-        _DashboardPage(service: _service, username: widget.username),
-        _RankingsPage(service: _service),
-        _ChartsPage(service: _service),
-        _HistoryPage(service: _service),
-        _SettingsPage(username: widget.username),
-      ]),
+      body: Stack(
+        children: List.generate(pages.length, (i) => IgnorePointer(
+          ignoring: _idx != i,
+          child: AnimatedOpacity(
+            opacity: _idx == i ? 1.0 : 0.0,
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeInOut,
+            child: pages[i],
+          ),
+        )),
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _idx,
         onDestinationSelected: (i) => setState(() => _idx = i),
