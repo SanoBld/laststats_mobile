@@ -3,162 +3,208 @@ name: Build LastStats (All Platforms)
 on:
   push:
     branches: [ main, master ]
+    tags:     [ 'v*.*.*' ]
   pull_request:
     branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      prerelease:
+        description: 'Mark as pre-release? (beta, rc...)'
+        type: boolean
+        required: false
+        default: false
+      version:
+        description: 'Version to release (e.g. 2.0.1) — leave empty to just build'
+        required: false
+        default: ''
 
 jobs:
-  # ─── COMPILATION WINDOWS ───────────────────────────────────────────
+  # Windows
   windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
           cache: true
-
       - run: flutter pub get
-
-      - name: Generate launcher icons
-        run: dart run flutter_launcher_icons
-
+      - run: dart run flutter_launcher_icons
       - name: Build Windows
         shell: bash
         run: |
           VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: *//' | cut -d'+' -f1)
           flutter build windows --release --build-name="$VERSION" --build-number=${{ github.run_number }}
-
-      - name: Upload Windows App
-        uses: actions/upload-artifact@v4
+      - name: Zip Windows build
+        shell: pwsh
+        run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath laststats-windows.zip
+      - uses: actions/upload-artifact@v4
         with:
-          name: laststats-windows-app
-          path: build/windows/x64/runner/Release/
+          name: laststats-windows
+          path: laststats-windows.zip
 
-  # ─── COMPILATION MACOS ─────────────────────────────────────────────
+  # macOS
   macos:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
           cache: true
-
       - run: flutter pub get
-
-      - name: Generate launcher icons
-        run: dart run flutter_launcher_icons
-
+      - run: dart run flutter_launcher_icons
       - name: Build macOS
-        shell: bash
         run: |
           VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: *//' | cut -d'+' -f1)
           flutter build macos --release --build-name="$VERSION" --build-number=${{ github.run_number }}
-
-      - name: Upload macOS App
-        uses: actions/upload-artifact@v4
+      - name: Zip macOS build
+        run: zip -r laststats-macos.zip build/macos/Build/Products/Release/
+      - uses: actions/upload-artifact@v4
         with:
-          name: laststats-macos-app
-          path: build/macos/Build/Products/Release/
+          name: laststats-macos
+          path: laststats-macos.zip
 
-  # ─── COMPILATION LINUX ─────────────────────────────────────────────
+  # Linux
   linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Linux dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++6
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
           cache: true
-
       - run: flutter pub get
-
-      - name: Generate launcher icons
-        run: dart run flutter_launcher_icons
-
+      - run: dart run flutter_launcher_icons
       - name: Build Linux
-        shell: bash
         run: |
           VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: *//' | cut -d'+' -f1)
           flutter build linux --release --build-name="$VERSION" --build-number=${{ github.run_number }}
-
-      - name: Upload Linux App
-        uses: actions/upload-artifact@v4
+      - name: Zip Linux build
+        run: zip -r laststats-linux.zip build/linux/x64/release/bundle/
+      - uses: actions/upload-artifact@v4
         with:
-          name: laststats-linux-app
-          path: build/linux/x64/release/bundle/
+          name: laststats-linux
+          path: laststats-linux.zip
 
-  # ─── COMPILATION ANDROID (APK) ─────────────────────────────────────
+  # Android
   android:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up JDK
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
           cache: true
-
       - run: flutter pub get
-
-      - name: Generate launcher icons
-        run: dart run flutter_launcher_icons
-
+      - run: dart run flutter_launcher_icons
       - name: Build APK
-        shell: bash
         run: |
           VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: *//' | cut -d'+' -f1)
           flutter build apk --release --build-name="$VERSION" --build-number=${{ github.run_number }}
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: laststats-android-apk
+          name: laststats-android
           path: build/app/outputs/flutter-apk/app-release.apk
 
-  # ─── COMPILATION WEB ───────────────────────────────────────────────
+  # Web
   web:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
           cache: true
-
       - run: flutter pub get
-
-      - name: Generate launcher icons
-        run: dart run flutter_launcher_icons
-
+      - run: dart run flutter_launcher_icons
       - name: Build Web
-        shell: bash
         run: |
           VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: *//' | cut -d'+' -f1)
           flutter build web --release --build-name="$VERSION" --build-number=${{ github.run_number }}
-
-      - name: Upload Web App
-        uses: actions/upload-artifact@v4
+      - name: Zip Web build
+        run: zip -r laststats-web.zip build/web/
+      - uses: actions/upload-artifact@v4
         with:
-          name: laststats-web-app
-          path: build/web/
+          name: laststats-web
+          path: laststats-web.zip
+
+  # Release
+  release:
+    needs: [ windows, macos, linux, android, web ]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.version != '')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve tag and version
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=v${{ inputs.version }}"    >> $GITHUB_OUTPUT
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+            # Auto prerelease if version contains - (e.g. 2.0.0-beta)
+            if [[ "${{ inputs.version }}" == *"-"* ]] || [ "${{ inputs.prerelease }}" = "true" ]; then
+              echo "prerelease=true"  >> $GITHUB_OUTPUT
+            else
+              echo "prerelease=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            TAG="${GITHUB_REF_NAME}"
+            VER="${TAG#v}"
+            echo "tag=$TAG"    >> $GITHUB_OUTPUT
+            echo "version=$VER" >> $GITHUB_OUTPUT
+            # Auto prerelease if tag contains - (e.g. v2.0.0-beta)
+            if [[ "$TAG" == *"-"* ]]; then
+              echo "prerelease=true"  >> $GITHUB_OUTPUT
+            else
+              echo "prerelease=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Create tag (manual dispatch only)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag ${{ steps.meta.outputs.tag }} || true
+          git push origin ${{ steps.meta.outputs.tag }} || true
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets/
+
+      - name: Create GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag:                  ${{ steps.meta.outputs.tag }}
+          name:                 "LastStats v${{ steps.meta.outputs.version }}"
+          artifacts:            "release-assets/**/*"
+          generateReleaseNotes: true
+          prerelease:           ${{ steps.meta.outputs.prerelease }}
+          makeLatest:           ${{ steps.meta.outputs.prerelease == 'false' }}
+          token:                ${{ secrets.GITHUB_TOKEN }}
+          body: |
+            ## LastStats v${{ steps.meta.outputs.version }}
+
+            ### Downloads
+            | Platform | File |
+            |----------|------|
+            | Android | `app-release.apk` |
+            | Windows | `laststats-windows.zip` |
+            | Linux   | `laststats-linux.zip` |
+            | macOS   | `laststats-macos.zip` |
+            | Web     | `laststats-web.zip` |
