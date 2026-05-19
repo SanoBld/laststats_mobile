@@ -56,7 +56,6 @@ You can download the latest builds directly from the **Actions** tab of this rep
   * `http` – Concurrent network management for REST requests.
   * `url_launcher` – External web redirection management.
 * **API Integration:** Last.fm REST API, iTunes Search API, Deezer API, and Cover Art Archive.
-* **Automation:** GitHub Actions (Unified multi-platform workflow with dynamic build-number injection via `build-all.yml`)
 
 ---
 
