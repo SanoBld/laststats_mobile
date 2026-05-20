@@ -233,7 +233,7 @@ class _ItemDetailSheetState extends State<_ItemDetailSheet> {
                 SizedBox(height: imgH - 80),
 
                 // Header
-                _buildHeader(ctx, scheme, imgH),
+                _buildHeader(ctx, scheme, imgH, hasImage),
 
                 // White surface body
                 Container(
@@ -319,7 +319,7 @@ class _ItemDetailSheetState extends State<_ItemDetailSheet> {
   }
 
   // Header
-  Widget _buildHeader(BuildContext ctx, ColorScheme scheme, double imgH) {
+  Widget _buildHeader(BuildContext ctx, ColorScheme scheme, double imgH, bool hasImage) {
     final text = Theme.of(ctx).textTheme;
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
@@ -349,13 +349,15 @@ class _ItemDetailSheetState extends State<_ItemDetailSheet> {
           ),
           const SizedBox(height: 8),
 
-          // Name — always white: header sits over image or dark gradient
+          // Name
           Text(
             _name,
             style: text.headlineMedium?.copyWith(
               fontWeight: FontWeight.w900,
-              color:      Colors.white,
-              shadows: [Shadow(blurRadius: 8, color: Colors.black.withValues(alpha: 0.5))],
+              color:      hasImage ? Colors.white : scheme.onSurface,
+              shadows: hasImage
+                  ? [Shadow(blurRadius: 8, color: Colors.black.withValues(alpha: 0.5))]
+                  : null,
             ),
           ),
 
@@ -365,9 +367,13 @@ class _ItemDetailSheetState extends State<_ItemDetailSheet> {
             Text(
               _artist,
               style: text.bodyLarge?.copyWith(
-                color:      Colors.white.withValues(alpha: 0.85),
+                color:      hasImage
+                    ? Colors.white.withValues(alpha: 0.85)
+                    : scheme.onSurfaceVariant,
                 fontWeight: FontWeight.w500,
-                shadows: [Shadow(blurRadius: 6, color: Colors.black.withValues(alpha: 0.5))],
+                shadows: hasImage
+                    ? [Shadow(blurRadius: 6, color: Colors.black.withValues(alpha: 0.5))]
+                    : null,
               ),
             ),
           ],
@@ -739,7 +745,7 @@ class _ItemDetailSheetState extends State<_ItemDetailSheet> {
 }
 
 
-// Gradient fallback shown in the header area when no cover image is available
+// Solid-color fallback shown in the header area when no cover image is available
 class _DetailGradientBg extends StatelessWidget {
   final ColorScheme scheme;
   const _DetailGradientBg({required this.scheme});
@@ -747,15 +753,12 @@ class _DetailGradientBg extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end:   Alignment.bottomRight,
-          colors: [
-            scheme.primary.withValues(alpha: 0.85),
-            scheme.secondary.withValues(alpha: 0.75),
-            scheme.tertiary.withValues(alpha: 0.65),
-          ],
+      color: scheme.surfaceContainerHighest,
+      child: Center(
+        child: Icon(
+          Icons.music_note_rounded,
+          size: 96,
+          color: scheme.onSurfaceVariant.withValues(alpha: 0.35),
         ),
       ),
     );

@@ -380,11 +380,6 @@ class _HistTrackRow extends StatelessWidget {
   final LastFmService service;
   const _HistTrackRow({required this.track, required this.time, required this.service});
 
-  Future<void> _openUrl(String url) async {
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
-  }
-
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -393,7 +388,6 @@ class _HistTrackRow extends StatelessWidget {
     final art    = (track['artist']?['#text'] ?? '').toString();
     final alb    = (track['album']?['#text']  ?? '').toString();
     final raw    = _extractImage(track['image']);
-    final q      = Uri.encodeComponent('$art $tit');
 
     return InkWell(
       onTap: () => showDetailSheet(context,
@@ -425,43 +419,8 @@ class _HistTrackRow extends StatelessWidget {
                       fontSize: 11, color: scheme.onSurfaceVariant.withValues(alpha: 0.7)))),
             ]),
           ])),
-          // Links
-          Row(mainAxisSize: MainAxisSize.min, children: [
-            _HistLink(
-              icon: Icons.smart_display_rounded,
-              color: const Color(0xFFFF0000),
-              onTap: () => _openUrl('https://www.youtube.com/results?search_query=$q'),
-            ),
-            const SizedBox(width: 4),
-            _HistLink(
-              icon: Icons.music_note_rounded,
-              color: const Color(0xFF1DB954),
-              onTap: () => _openUrl('https://open.spotify.com/search/$q'),
-            ),
-          ]),
-        ]),
-      ),
-    );
-  }
-}
 
-class _HistLink extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final VoidCallback onTap;
-  const _HistLink({required this.icon, required this.color, required this.onTap});
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 30, height: 30,
-        decoration: BoxDecoration(
-          color: scheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Icon(icon, size: 16, color: color),
+        ]),
       ),
     );
   }
@@ -605,4 +564,3 @@ const _kStartupLabels = [
   (Icons.auto_graph_rounded,   'Graphiques'),
   (Icons.history_rounded,      'Historique'),
 ];
-
