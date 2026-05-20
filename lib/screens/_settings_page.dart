@@ -894,7 +894,7 @@ class _SettingsSection extends StatelessWidget {
         elevation: 0, color: scheme.surfaceContainerHighest,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          side: _cardBorder(scheme),           // ← contour Material You
+          side: _cardBorder(scheme),           
         ),
         child: Column(children: children)),
     ]);
