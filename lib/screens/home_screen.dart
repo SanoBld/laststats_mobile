@@ -12,6 +12,7 @@ import 'setup_screen.dart';
 
 // Parts
 part '_dashboard_page.dart';
+part '_search_page.dart';
 part '_rankings_page.dart';
 part '_detail_sheet.dart';
 part '_charts_page.dart';
@@ -100,7 +101,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _idx     = widget.startupTab.clamp(0, 4);
+    _idx     = widget.startupTab.clamp(0, 5);
     _service = LastFmService(apiKey: widget.apiKey, username: widget.username);
   }
 
@@ -108,6 +109,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final pages = [
       _DashboardPage(service: _service, username: widget.username),
+      _SearchPage(service: _service),
       _RankingsPage(service: _service),
       _ChartsPage(service: _service),
       _HistoryPage(service: _service),
@@ -134,6 +136,11 @@ class _HomeScreenState extends State<HomeScreen> {
             icon:         Icon(Icons.dashboard_outlined),
             selectedIcon: Icon(Icons.dashboard_rounded),
             label: 'Dashboard',
+          ),
+          NavigationDestination(
+            icon:         Icon(Icons.search_outlined),
+            selectedIcon: Icon(Icons.search_rounded),
+            label: 'Recherche',
           ),
           NavigationDestination(
             icon:         Icon(Icons.emoji_events_outlined),

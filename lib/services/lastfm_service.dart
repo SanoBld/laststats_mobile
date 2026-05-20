@@ -285,4 +285,67 @@ class LastFmService {
     }
     return (rank: -1, plays: 0);
   }
+
+  // ── Global search ────────────────────────────────────────
+
+  /// Searches Last.fm users by username prefix.
+  /// Returns a list of user objects with name, image, playcount.
+  Future<List<dynamic>> searchUsers(
+    String query, {
+    int limit = 15,
+    int page  = 1,
+  }) async {
+    final d = await _call({
+      'method': 'user.search',
+      'user':   query,
+      'limit':  '$limit',
+      'page':   '$page',
+    });
+    return _asList(d['results']?['usermatches']?['user']);
+  }
+
+  /// Searches artists globally via artist.search.
+  Future<List<dynamic>> searchArtists(
+    String query, {
+    int limit = 15,
+    int page  = 1,
+  }) async {
+    final d = await _call({
+      'method': 'artist.search',
+      'artist': query,
+      'limit':  '$limit',
+      'page':   '$page',
+    });
+    return _asList(d['results']?['artistmatches']?['artist']);
+  }
+
+  /// Searches albums globally via album.search.
+  Future<List<dynamic>> searchAlbums(
+    String query, {
+    int limit = 15,
+    int page  = 1,
+  }) async {
+    final d = await _call({
+      'method': 'album.search',
+      'album':  query,
+      'limit':  '$limit',
+      'page':   '$page',
+    });
+    return _asList(d['results']?['albummatches']?['album']);
+  }
+
+  /// Searches tracks globally via track.search.
+  Future<List<dynamic>> searchTracks(
+    String query, {
+    int limit = 15,
+    int page  = 1,
+  }) async {
+    final d = await _call({
+      'method': 'track.search',
+      'track':  query,
+      'limit':  '$limit',
+      'page':   '$page',
+    });
+    return _asList(d['results']?['trackmatches']?['track']);
+  }
 }
