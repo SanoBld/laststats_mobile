@@ -190,18 +190,19 @@ class _ItemDetailSheetState extends State<_ItemDetailSheet> {
       borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       child: Stack(
         children: [
-          // ── Background image ──────────────────────────────────
-          if (hasImage)
-            Positioned.fill(
-              child: Image.network(
-                _resolvedImage,
-                fit: BoxFit.cover,
-                color: Colors.black.withValues(alpha: 0.55),
-                colorBlendMode: BlendMode.darken,
-                alignment: Alignment.topCenter,
-                errorBuilder: (_, __, ___) => Container(color: scheme.surface),
-              ),
-            ),
+          // ── Background image (or gradient fallback) ──────────
+          Positioned.fill(
+            child: hasImage
+                ? Image.network(
+                    _resolvedImage,
+                    fit: BoxFit.cover,
+                    color: Colors.black.withValues(alpha: 0.55),
+                    colorBlendMode: BlendMode.darken,
+                    alignment: Alignment.topCenter,
+                    errorBuilder: (_, __, ___) => _DetailGradientBg(scheme: scheme),
+                  )
+                : _DetailGradientBg(scheme: scheme),
+          ),
 
           // ── Frosted overlay (bottom fade to surface) ──────────
           Positioned.fill(
@@ -348,14 +349,13 @@ class _ItemDetailSheetState extends State<_ItemDetailSheet> {
           ),
           const SizedBox(height: 8),
 
-          // Name
+          // Name — always white: header sits over image or dark gradient
           Text(
             _name,
             style: text.headlineMedium?.copyWith(
               fontWeight: FontWeight.w900,
-              color:      scheme.brightness == Brightness.dark
-                          ? Colors.white : scheme.onSurface,
-              shadows: [Shadow(blurRadius: 8, color: Colors.black.withValues(alpha: 0.4))],
+              color:      Colors.white,
+              shadows: [Shadow(blurRadius: 8, color: Colors.black.withValues(alpha: 0.5))],
             ),
           ),
 
@@ -738,6 +738,30 @@ class _ItemDetailSheetState extends State<_ItemDetailSheet> {
   }
 }
 
+
+// Gradient fallback shown in the header area when no cover image is available
+class _DetailGradientBg extends StatelessWidget {
+  final ColorScheme scheme;
+  const _DetailGradientBg({required this.scheme});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end:   Alignment.bottomRight,
+          colors: [
+            scheme.primary.withValues(alpha: 0.85),
+            scheme.secondary.withValues(alpha: 0.75),
+            scheme.tertiary.withValues(alpha: 0.65),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // Small stat chip
 
 class _StatChip extends StatelessWidget {
@@ -796,4 +820,3 @@ class _StatChip extends StatelessWidget {
 
 
 // Charts
-
