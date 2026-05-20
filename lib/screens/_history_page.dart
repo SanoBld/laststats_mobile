@@ -77,17 +77,18 @@ class _HistoryPageState extends State<_HistoryPage>
   int get _uniqueAlbums  => _tracks.map((t) => (t as Map)['album']?['#text']  ?? '')
       .where((a) => (a as String).isNotEmpty).toSet().length;
 
-  // Group by hour descending
+  // Group by LOCAL hour descending.
+  // Last.fm returns a Unix timestamp in date['uts'] — we convert to device-local time.
   List<MapEntry<String, List<dynamic>>> get _byHour {
     final map = <String, List<dynamic>>{};
     for (final t in _tracks) {
-      final dateStr = (t as Map)['date']?['#text']?.toString() ?? '';
+      final uts = (t as Map)['date']?['uts']?.toString() ?? '';
       String hour = '—';
-      if (dateStr.isNotEmpty) {
-        final parts = dateStr.split(', ');
-        if (parts.length == 2) {
-          final h = parts[1].split(':')[0];
-          hour = '$h:00';
+      if (uts.isNotEmpty) {
+        final seconds = int.tryParse(uts);
+        if (seconds != null) {
+          final local = DateTime.fromMillisecondsSinceEpoch(seconds * 1000);
+          hour = '${local.hour.toString().padLeft(2, '0')}:00';
         }
       }
       map.putIfAbsent(hour, () => []).add(t);
@@ -301,19 +302,30 @@ class _HistStatPill extends StatelessWidget {
   );
 }
 
+// ── Helper: parse a Last.fm track's Unix timestamp (UTC) to local DateTime ──
+// Last.fm always returns UTC in date['#text'], but the Unix timestamp
+// in date['uts'] is timezone-agnostic — DateTime.fromMillisecondsSinceEpoch
+// converts it to the device's local timezone automatically.
+DateTime? _localDateTimeFromTrack(Map t) {
+  final uts = t['date']?['uts']?.toString() ?? '';
+  if (uts.isEmpty) return null;
+  final seconds = int.tryParse(uts);
+  if (seconds == null) return null;
+  return DateTime.fromMillisecondsSinceEpoch(seconds * 1000);
+}
+
+String _localTimeString(Map t) {
+  final dt = _localDateTimeFromTrack(t);
+  if (dt == null) return '';
+  return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+}
+
 // Chronological view
 class _HistChronView extends StatelessWidget {
   final List<dynamic> tracks;
   final List<MapEntry<String, List<dynamic>>> byHour;
   final LastFmService service;
   const _HistChronView({required this.tracks, required this.byHour, required this.service});
-
-  static String _time(Map t) {
-    final raw = t['date']?['#text']?.toString() ?? '';
-    if (raw.isEmpty) return '';
-    final parts = raw.split(', ');
-    return parts.length == 2 ? parts[1] : '';
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -326,8 +338,8 @@ class _HistChronView extends StatelessWidget {
         padding: const EdgeInsets.only(bottom: 24),
         itemCount: byHour.length,
         itemBuilder: (_, i) {
-          final entry  = byHour[i];
-          final hour   = entry.key;
+          final entry   = byHour[i];
+          final hour    = entry.key;
           final hTracks = entry.value;
           return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             // Hour separator
@@ -364,7 +376,11 @@ class _HistChronView extends StatelessWidget {
               ]),
             ),
             for (final t in hTracks)
-              _HistTrackRow(track: t as Map, time: _time(t), service: service),
+              _HistTrackRow(
+                track: t as Map,
+                time: _localTimeString(t),
+                service: service,
+              ),
             const SizedBox(height: 6),
           ]);
         },
@@ -396,7 +412,7 @@ class _HistTrackRow extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
         child: Row(children: [
-          // Time
+          // Local time
           SizedBox(width: 40,
             child: Text(time, style: text.labelSmall?.copyWith(
                 color: scheme.onSurfaceVariant, fontWeight: FontWeight.w500))),
@@ -419,7 +435,6 @@ class _HistTrackRow extends StatelessWidget {
                       fontSize: 11, color: scheme.onSurfaceVariant.withValues(alpha: 0.7)))),
             ]),
           ])),
-
         ]),
       ),
     );
@@ -445,9 +460,8 @@ class _HistListeView extends StatelessWidget {
         final art = (t['artist']?['#text'] ?? '').toString();
         final alb = (t['album']?['#text']  ?? '').toString();
         final raw = _extractImage(t['image']);
-        final dateStr = t['date']?['#text']?.toString() ?? '';
-        final timeParts = dateStr.split(', ');
-        final timeOnly = timeParts.length == 2 ? timeParts[1] : '';
+        // Use local time via Unix timestamp instead of the UTC #text field
+        final timeOnly = _localTimeString(t);
         return ListTile(
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
           leading: _SmartImage(size: 44, borderRadius: 6, initialUrl: raw,
