@@ -162,16 +162,28 @@ class _DashboardPageState extends State<_DashboardPage> {
       for (final u in raw) {
         final uname      = (u['name'] ?? '').toString();
         final rawRecent  = u['recenttrack'];
-        final isMap      = rawRecent is Map;
-        final isOnline   = isMap &&
-            (rawRecent['@attr']?['nowplaying'] == 'true');
+
+        // Last.fm renvoie une List quand l'ami est en train d'écouter
+        // (nowplaying + dernier scrobble), ou un Map seul sinon.
+        Map? recentMap;
+        if (rawRecent is List && rawRecent.isNotEmpty) {
+          recentMap = rawRecent.firstWhere(
+            (t) => t is Map && t['@attr']?['nowplaying'] == 'true',
+            orElse: () => rawRecent.first,
+          ) as Map?;
+        } else if (rawRecent is Map) {
+          recentMap = rawRecent;
+        }
+
+        final isOnline = recentMap != null &&
+            (recentMap['@attr']?['nowplaying'] == 'true');
 
         String trackName  = '';
         String artistName = '';
-        if (isMap) {
-          trackName  = (rawRecent['name'] ?? '').toString();
+        if (recentMap != null) {
+          trackName  = (recentMap['name'] ?? '').toString();
           // artist field varies: '#text' in recenttrack, plain string otherwise
-          final rawArtist = rawRecent['artist'];
+          final rawArtist = recentMap['artist'];
           if (rawArtist is Map) {
             artistName = (rawArtist['#text'] ?? rawArtist['name'] ?? '').toString();
           } else {

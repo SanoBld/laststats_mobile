@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -25,6 +26,81 @@ class _SetupScreenState extends State<SetupScreen> {
     _usernameCtrl.dispose();
     _apikeyCtrl.dispose();
     super.dispose();
+  }
+
+  // ── Import JSON ────────────────────────────────────────────────────────
+  // Format attendu : {"username": "...", "api_key": "..."} ou {"apiKey": "..."}
+  Future<void> _importJson() async {
+    final ctrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final scheme = Theme.of(ctx).colorScheme;
+        return AlertDialog(
+          title: const Text('Importer JSON'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Colle le contenu de ton fichier JSON ci-dessous.',
+                style: Theme.of(ctx).textTheme.bodySmall
+                    ?.copyWith(color: scheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '{ "username": "…", "api_key": "…" }',
+                style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                    fontFamily: 'monospace', color: scheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller:  ctrl,
+                maxLines:    5,
+                autocorrect: false,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                decoration: InputDecoration(
+                  hintText: '{ "username": "...", "api_key": "..." }',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Annuler'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Importer'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (ok != true || !mounted) return;
+    final raw = ctrl.text.trim();
+    if (raw.isEmpty) return;
+
+    try {
+      final Map<String, dynamic> data = jsonDecode(raw) as Map<String, dynamic>;
+      final username = (data['username'] ?? '').toString().trim();
+      final apiKey   = (data['api_key'] ?? data['apiKey'] ?? data['api-key'] ?? '').toString().trim();
+
+      if (username.isEmpty || apiKey.isEmpty) {
+        setState(() => _errorMessage = 'JSON invalide : champs "username" ou "api_key" manquants.');
+        return;
+      }
+      setState(() {
+        _usernameCtrl.text = username;
+        _apikeyCtrl.text   = apiKey;
+        _errorMessage      = null;
+      });
+    } catch (_) {
+      setState(() => _errorMessage = 'JSON invalide. Vérifie le format.');
+    }
   }
 
   Future<void> _launch() async {
@@ -283,6 +359,20 @@ class _SetupScreenState extends State<SetupScreen> {
                   ),
 
                   const SizedBox(height: 16),
+
+                  // ── Import JSON ──────────────────────────────
+                  OutlinedButton.icon(
+                    onPressed: _importJson,
+                    icon:  const Icon(Icons.upload_file_rounded, size: 18),
+                    label: const Text('Importer JSON'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+
+                  const SizedBox(height: 8),
 
                   Center(
                     child: TextButton.icon(
