@@ -125,11 +125,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final pages = [
       _DashboardPage(service: _service, username: widget.username),
-      _SearchPage(service: _service),
       _RankingsPage(service: _service),
       _ChartsPage(service: _service),
       _HistoryPage(service: _service),
-      _SettingsPage(username: widget.username),
     ];
 
     return Scaffold(
@@ -172,11 +170,6 @@ class _HomeScreenState extends State<HomeScreen> {
             icon:         const Icon(Icons.history_outlined),
             selectedIcon: const Icon(Icons.history_rounded),
             label: L.navHistory,
-          ),
-          NavigationDestination(
-            icon:         const Icon(Icons.settings_outlined),
-            selectedIcon: const Icon(Icons.settings_rounded),
-            label: L.navSettings,
           ),
         ],
       ),

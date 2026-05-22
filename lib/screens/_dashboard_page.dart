@@ -160,7 +160,7 @@ class _DashboardPageState extends State<_DashboardPage> {
 
       // getFriends ne retourne pas fiablement nowplaying — on appelle
       // getRecentTracks(limit:1) pour chaque ami en parallèle, exactement
-      // comme on le fait pour la page de profil individuelle.
+      // comme sur la page de profil individuelle.
       final usernames = raw.map((u) => (u['name'] ?? '').toString()).toList();
 
       final recentResults = await Future.wait(
@@ -424,6 +424,22 @@ class _DashboardPageState extends State<_DashboardPage> {
               onPressed: _load,
               tooltip: L.dashRefresh,
             ),
+            IconButton(
+              icon: const Icon(Icons.settings_outlined),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => Scaffold(
+                    appBar: AppBar(
+                      title: Text(L.navSettings),
+                      scrolledUnderElevation: 0,
+                    ),
+                    body: _SettingsPage(username: widget.username),
+                  ),
+                ),
+              ),
+              tooltip: L.navSettings,
+            ),
+            const SizedBox(width: 4),
           ],
           flexibleSpace: FlexibleSpaceBar(
             stretchModes: const [
