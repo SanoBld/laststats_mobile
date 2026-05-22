@@ -156,38 +156,44 @@ class _DashboardPageState extends State<_DashboardPage> {
     if (!mounted) return;
     setState(() => _friendsLoading = true);
     try {
-      final raw = await widget.service.getFriends(limit: 50, withRecentTrack: true);
+      final raw = await widget.service.getFriends(limit: 50, withRecentTrack: false);
+
+      // getFriends ne retourne pas fiablement nowplaying — on appelle
+      // getRecentTracks(limit:1) pour chaque ami en parallèle, exactement
+      // comme on le fait pour la page de profil individuelle.
+      final usernames = raw.map((u) => (u['name'] ?? '').toString()).toList();
+
+      final recentResults = await Future.wait(
+        usernames.map((name) => widget.service
+            .getRecentTracks(limit: 1, user: name)
+            .catchError((_) => <String, dynamic>{})),
+      );
+
       final friends = <_FriendData>[];
 
-      for (final u in raw) {
-        final uname      = (u['name'] ?? '').toString();
-        final rawRecent  = u['recenttrack'];
+      for (var i = 0; i < raw.length; i++) {
+        final u     = raw[i];
+        final uname = usernames[i];
 
-        // Last.fm renvoie une List quand l'ami est en train d'écouter
-        // (nowplaying + dernier scrobble), ou un Map seul sinon.
-        Map? recentMap;
-        if (rawRecent is List && rawRecent.isNotEmpty) {
-          recentMap = rawRecent.firstWhere(
-            (t) => t is Map && t['@attr']?['nowplaying'] == 'true',
-            orElse: () => rawRecent.first,
-          ) as Map?;
-        } else if (rawRecent is Map) {
-          recentMap = rawRecent;
-        }
+        final recentData = recentResults[i] as Map<String, dynamic>;
+        final trackRaw   = recentData['track'];
+        final tList      = trackRaw is List
+            ? trackRaw
+            : (trackRaw != null ? [trackRaw] : []);
 
-        final isOnline = recentMap != null &&
-            (recentMap['@attr']?['nowplaying'] == 'true');
-
+        bool   isOnline   = false;
         String trackName  = '';
         String artistName = '';
-        if (recentMap != null) {
-          trackName  = (recentMap['name'] ?? '').toString();
-          // artist field varies: '#text' in recenttrack, plain string otherwise
-          final rawArtist = recentMap['artist'];
-          if (rawArtist is Map) {
-            artistName = (rawArtist['#text'] ?? rawArtist['name'] ?? '').toString();
+
+        if (tList.isNotEmpty) {
+          final t   = tList.first as Map;
+          isOnline  = t['@attr']?['nowplaying'] == 'true';
+          trackName = (t['name'] ?? '').toString();
+          final ra  = t['artist'];
+          if (ra is Map) {
+            artistName = (ra['#text'] ?? ra['name'] ?? '').toString();
           } else {
-            artistName = rawArtist?.toString() ?? '';
+            artistName = ra?.toString() ?? '';
           }
         }
 
