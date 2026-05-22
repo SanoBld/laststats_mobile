@@ -125,6 +125,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final pages = [
       _DashboardPage(service: _service, username: widget.username),
+      _SearchPage(service: _service),
       _RankingsPage(service: _service),
       _ChartsPage(service: _service),
       _HistoryPage(service: _service),
