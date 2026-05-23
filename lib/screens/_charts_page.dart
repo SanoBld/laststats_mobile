@@ -31,19 +31,11 @@ class _ChartsPageState extends State<_ChartsPage>
   bool _loading = true;
   String? _error;
 
-  // ── Gems ──────────────────────────────────────────────────────────────
-  bool _gemsLoading = false;
-  List<_GemEntry> _gems = [];
-
   // ── Listening habits ──────────────────────────────────────────────────
   bool _hourlyLoading = false;
   Map<int, int>? _hourlyData;
   Map<int, int>? _weekdayData;
   int _hourlyCount = 0;
-
-  // ── One-hit wonders ───────────────────────────────────────────────────
-  bool _wondersLoading = false;
-  List<Map<String, dynamic>> _wonders = [];
 
   // ── Calendar ──────────────────────────────────────────────────────────
   bool _calendarLoading = false;
@@ -75,6 +67,10 @@ class _ChartsPageState extends State<_ChartsPage>
         _topAlbums  = res[2] as List<dynamic>;
         _loading    = false;
       });
+      // Auto-load all secondary charts without user action
+      _loadTags();
+      _loadHourly();
+      _loadCalendar();
     } catch (e) {
       setState(() {
         _error   = e.toString().replaceFirst('Exception: ', '');
@@ -86,6 +82,7 @@ class _ChartsPageState extends State<_ChartsPage>
   // ── Hourly / weekday ──────────────────────────────────────────────────
 
   Future<void> _loadHourly() async {
+    if (_hourlyLoading) return;
     setState(() {
       _hourlyLoading = true;
       _hourlyData    = null;
@@ -125,45 +122,10 @@ class _ChartsPageState extends State<_ChartsPage>
     } catch (_) { setState(() => _hourlyLoading = false); }
   }
 
-  // ── One-hit wonders ───────────────────────────────────────────────────
-
-  Future<void> _loadWonders() async {
-    setState(() { _wondersLoading = true; _wonders = []; });
-    try {
-      final pages = await Future.wait(
-        List.generate(10, (i) => widget.service.getRecentTracks(limit: 50, page: i + 1)),
-      );
-      final counts = <String, int>{};
-      final images = <String, String>{};
-      for (final page in pages) {
-        final raw  = page['track'];
-        final list = raw is List ? raw : (raw != null ? [raw] : <dynamic>[]);
-        for (final t in list) {
-          final m = t as Map?;
-          if (m == null) continue;
-          if (m['@attr']?['nowplaying'] == 'true') continue;
-          final artist = (m['artist']?['#text'] ?? m['artist']?['name'] ?? '').toString();
-          if (artist.isEmpty) continue;
-          counts[artist] = (counts[artist] ?? 0) + 1;
-          if (!images.containsKey(artist)) images[artist] = _extractImage(m['image']);
-        }
-      }
-      final list = counts.entries
-          .where((e) => e.value >= 1 && e.value <= 3)
-          .map((e) => <String, dynamic>{
-                'name':  e.key,
-                'count': e.value,
-                'image': images[e.key] ?? '',
-              })
-          .toList();
-      list.sort((a, b) => (b['count'] as int).compareTo(a['count'] as int));
-      setState(() { _wonders = list.take(20).toList(); _wondersLoading = false; });
-    } catch (_) { setState(() => _wondersLoading = false); }
-  }
-
   // ── Calendar heatmap ──────────────────────────────────────────────────
 
   Future<void> _loadCalendar() async {
+    if (_calendarLoading) return;
     setState(() { _calendarLoading = true; _calendarData = null; });
     try {
       final pages = await Future.wait(
@@ -193,7 +155,7 @@ class _ChartsPageState extends State<_ChartsPage>
   // ── Genre tags ────────────────────────────────────────────────────────
 
   Future<void> _loadTags() async {
-    if (_topArtists.isEmpty) return;
+    if (_topArtists.isEmpty || _tagsLoading) return;
     setState(() { _tagsLoading = true; _tags = []; });
     try {
       final artists = _topArtists.take(10).toList();
@@ -220,29 +182,6 @@ class _ChartsPageState extends State<_ChartsPage>
         _tagsLoading = false;
       });
     } catch (_) { setState(() => _tagsLoading = false); }
-  }
-
-  // ── Gems ──────────────────────────────────────────────────────────────
-
-  Future<void> _computeGems() async {
-    if (_topArtists.isEmpty) return;
-    setState(() { _gemsLoading = true; _gems = []; });
-    List<dynamic> artists;
-    try {
-      artists = await widget.service.getTopArtists(period: 'overall', limit: 15);
-    } catch (_) { artists = _topArtists.take(15).toList(); }
-    final listeners = await Future.wait(
-        artists.map((a) => widget.service.getArtistListeners((a['name'] ?? '').toString())));
-    final entries = <_GemEntry>[];
-    for (var i = 0; i < artists.length; i++) {
-      entries.add(_GemEntry(
-        name:      (artists[i]['name']      ?? '').toString(),
-        plays:     int.tryParse((artists[i]['playcount'] ?? '0').toString()) ?? 0,
-        listeners: listeners[i] ?? 0,
-      ));
-    }
-    entries.sort((a, b) => a.listeners.compareTo(b.listeners));
-    setState(() { _gems = entries; _gemsLoading = false; });
   }
 
   // ── Build ─────────────────────────────────────────────────────────────
@@ -303,15 +242,9 @@ class _ChartsPageState extends State<_ChartsPage>
         Text(_ct('Basé sur vos top artistes', 'Based on your top artists'),
             style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
         const SizedBox(height: 12),
-        if (_tags.isEmpty && !_tagsLoading)
-          FilledButton.icon(
-            onPressed: _loadTags,
-            icon: const Icon(Icons.tag_rounded),
-            label: Text(_ct('Analyser mes genres', 'Analyse my genres')),
-          )
-        else if (_tagsLoading)
+        if (_tagsLoading)
           const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator()))
-        else ...[
+        else if (_tags.isNotEmpty) ...[
           _TagsCard(tags: _tags),
           const SizedBox(height: 4),
           Center(child: TextButton(onPressed: _loadTags, child: Text(_ct('Recalculer', 'Recalculate')))),
@@ -333,18 +266,12 @@ class _ChartsPageState extends State<_ChartsPage>
           style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
         ),
         const SizedBox(height: 12),
-        if (_hourlyData == null && !_hourlyLoading)
-          FilledButton.icon(
-            onPressed: _loadHourly,
-            icon: const Icon(Icons.bar_chart_rounded),
-            label: Text(_ct('Analyser', 'Analyse')),
-          )
-        else if (_hourlyLoading)
+        if (_hourlyLoading)
           const Center(child: Padding(
             padding: EdgeInsets.all(24),
             child: CircularProgressIndicator(),
           ))
-        else ...[
+        else if (_hourlyData != null) ...[
           _HourlyBarCard(data: _hourlyData!),
           const SizedBox(height: 12),
           _WeekdayBarCard(data: _weekdayData!),
@@ -356,40 +283,7 @@ class _ChartsPageState extends State<_ChartsPage>
         ],
         const SizedBox(height: 24),
 
-        // ── 5. Découvertes passagères ─────────────────────────────────────
-        _SectionHeader(
-          title: _ct('Découvertes passagères', 'One-Hit Wonders'),
-          icon: Icons.auto_awesome_rounded,
-        ),
-        const SizedBox(height: 8),
-        Text(
-          _ct('Artistes écoutés 1 à 3 fois seulement',
-              'Artists played only 1 to 3 times'),
-          style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-        ),
-        const SizedBox(height: 12),
-        if (_wonders.isEmpty && !_wondersLoading)
-          FilledButton.icon(
-            onPressed: _loadWonders,
-            icon: const Icon(Icons.search_rounded),
-            label: Text(_ct('Découvrir', 'Discover')),
-          )
-        else if (_wondersLoading)
-          const Center(child: Padding(
-            padding: EdgeInsets.all(24),
-            child: CircularProgressIndicator(),
-          ))
-        else ...[
-          _WondersCard(wonders: _wonders),
-          const SizedBox(height: 4),
-          Center(child: TextButton(
-            onPressed: _loadWonders,
-            child: Text(_ct('Recalculer', 'Recalculate')),
-          )),
-        ],
-        const SizedBox(height: 24),
-
-        // ── 6. Artist donut ───────────────────────────────────────────────
+        // ── 5. Artist donut ───────────────────────────────────────────────
         if (_topArtists.isNotEmpty) ...[
           _SectionHeader(title: L.chartsArtistDist, icon: Icons.mic_rounded),
           const SizedBox(height: 12),
@@ -408,7 +302,7 @@ class _ChartsPageState extends State<_ChartsPage>
           const SizedBox(height: 24),
         ],
 
-        // ── 7. Album donut ────────────────────────────────────────────────
+        // ── 6. Album donut ────────────────────────────────────────────────
         if (_topAlbums.isNotEmpty) ...[
           _SectionHeader(
             title: _ct('Répartition par album', 'Album distribution'),
@@ -430,7 +324,7 @@ class _ChartsPageState extends State<_ChartsPage>
           const SizedBox(height: 24),
         ],
 
-        // ── 8. Calendar heatmap ───────────────────────────────────────────
+        // ── 7. Calendar heatmap ───────────────────────────────────────────
         _SectionHeader(
           title: _ct('Calendrier musical', 'Listening calendar'),
           icon: Icons.grid_on_rounded,
@@ -439,79 +333,17 @@ class _ChartsPageState extends State<_ChartsPage>
         Text(_ct('Activité récente jour par jour', 'Recent activity day by day'),
             style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
         const SizedBox(height: 12),
-        if (_calendarData == null && !_calendarLoading)
-          FilledButton.icon(
-            onPressed: _loadCalendar,
-            icon: const Icon(Icons.calendar_today_rounded),
-            label: Text(_ct('Charger', 'Load')),
-          )
-        else if (_calendarLoading)
+        if (_calendarLoading)
           const Center(child: Padding(
             padding: EdgeInsets.all(24),
             child: CircularProgressIndicator(),
           ))
-        else ...[
+        else if (_calendarData != null) ...[
           _CalendarCard(data: _calendarData!),
           const SizedBox(height: 4),
           Center(child: TextButton(
             onPressed: _loadCalendar,
             child: Text(_ct('Recalculer', 'Recalculate')),
-          )),
-        ],
-        const SizedBox(height: 24),
-
-        // ── 9. Mainstream vs gems ─────────────────────────────────────────
-        _SectionHeader(title: L.chartsMainstreamTitle, icon: Icons.diamond_outlined),
-        const SizedBox(height: 8),
-        Text(L.chartsMainstreamSubtitle,
-            style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
-        const SizedBox(height: 12),
-        if (_gems.isEmpty && !_gemsLoading)
-          FilledButton.icon(
-            onPressed: _computeGems,
-            icon: const Icon(Icons.calculate_rounded),
-            label: Text(L.chartsCompute),
-          )
-        else if (_gemsLoading)
-          const Center(child: Padding(
-            padding: EdgeInsets.all(16),
-            child: CircularProgressIndicator(),
-          ))
-        else ...[
-          _GemsListenersChart(gems: _gems),
-          const SizedBox(height: 12),
-          ..._gems.map((gem) {
-            final isGem = gem.listeners < 500000;
-            return Card(
-              elevation: 0,
-              color: scheme.surfaceContainerHighest,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: _cardBorder(scheme)),
-              margin: const EdgeInsets.only(bottom: 6),
-              child: ListTile(
-                leading: Text(isGem ? '💎' : '🎤',
-                    style: const TextStyle(fontSize: 24)),
-                title: Text(gem.name,
-                    style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
-                subtitle: Text(L.globalListeners(_fmt(gem.listeners)),
-                    style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
-                trailing: Text(
-                  isGem ? L.chartsGem : L.chartsMainstream,
-                  style: text.labelSmall?.copyWith(
-                    color: isGem ? scheme.tertiary : scheme.primary,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                onTap: () => showDetailSheet(
-                  context, {'name': gem.name}, 'artists', widget.service,
-                ),
-              ),
-            );
-          }),
-          Center(child: TextButton(
-            onPressed: _computeGems,
-            child: Text(L.chartsRecompute),
           )),
         ],
         const SizedBox(height: 20),
@@ -938,83 +770,6 @@ class _DonutPainter extends CustomPainter {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-//  _WondersCard  — 2-column grid of one-hit wonder artists
-// ══════════════════════════════════════════════════════════════════════════
-
-class _WondersCard extends StatelessWidget {
-  final List<Map<String, dynamic>> wonders;
-  const _WondersCard({required this.wonders});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final text   = Theme.of(context).textTheme;
-
-    if (wonders.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(
-            _ct('Aucune découverte passagère trouvée', 'No one-hit wonders found'),
-            style: TextStyle(color: scheme.onSurfaceVariant),
-          ),
-        ),
-      );
-    }
-
-    return Card(
-      elevation: 0,
-      color: scheme.surfaceContainerHighest,
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: _cardBorder(scheme)),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount:    2,
-            childAspectRatio:  3.5,
-            crossAxisSpacing:  8,
-            mainAxisSpacing:   4,
-          ),
-          itemCount: wonders.length,
-          itemBuilder: (ctx, i) {
-            final w     = wonders[i];
-            final name  = (w['name']  ?? '').toString();
-            final count = w['count'] as int;
-            return Row(children: [
-              SizedBox(
-                width: 22,
-                child: Text('${i + 1}',
-                    textAlign: TextAlign.center,
-                    style: text.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w700)),
-              ),
-              const SizedBox(width: 6),
-              Expanded(child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment:  MainAxisAlignment.center,
-                children: [
-                  Text(name,
-                      maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: text.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
-                  Text('$count ${L.commonPlays}',
-                      style: text.labelSmall?.copyWith(
-                          color: scheme.onSurfaceVariant, fontSize: 9)),
-                ],
-              )),
-            ]);
-          },
-        ),
-      ),
-    );
-  }
-}
-
-// ══════════════════════════════════════════════════════════════════════════
 //  _CalendarCard  — day-by-day heatmap (last 4 months)
 // ══════════════════════════════════════════════════════════════════════════
 
@@ -1343,67 +1098,6 @@ class _WeekdayBarCard extends StatelessWidget {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-//  _GemsListenersChart  — horizontal bars for gems (preserved)
-// ══════════════════════════════════════════════════════════════════════════
-
-class _GemsListenersChart extends StatelessWidget {
-  final List<_GemEntry> gems;
-  const _GemsListenersChart({required this.gems});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final text   = Theme.of(context).textTheme;
-    final mx     = gems.map((g) => g.listeners).fold(0, (a, b) => a > b ? a : b);
-    if (mx == 0) return const SizedBox.shrink();
-
-    return Card(
-      elevation: 0,
-      color: scheme.surfaceContainerHighest,
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: _cardBorder(scheme)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(_ct('Auditeurs mondiaux', 'Global listeners'),
-              style: text.labelMedium?.copyWith(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 12),
-          ...gems.map((gem) {
-            final ratio = mx > 0 ? gem.listeners / mx : 0.0;
-            final isGem = gem.listeners < 500000;
-            final color = isGem ? scheme.tertiary : scheme.primary;
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Row(children: [
-                Text(isGem ? '💎' : '🎤', style: const TextStyle(fontSize: 14)),
-                const SizedBox(width: 6),
-                Expanded(flex: 3, child: Text(gem.name,
-                    maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: text.bodySmall?.copyWith(fontWeight: FontWeight.w600))),
-                const SizedBox(width: 8),
-                Expanded(flex: 5, child: ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: LinearProgressIndicator(
-                    value: ratio, minHeight: 7,
-                    backgroundColor: color.withValues(alpha: 0.15),
-                    valueColor: AlwaysStoppedAnimation<Color>(color),
-                  ),
-                )),
-                const SizedBox(width: 8),
-                Text(_fmt(gem.listeners),
-                    style: text.bodySmall
-                        ?.copyWith(color: color, fontWeight: FontWeight.w600)),
-              ]),
-            );
-          }),
-        ]),
-      ),
-    );
-  }
-}
-
-// ══════════════════════════════════════════════════════════════════════════
 //  Small shared sub-widgets
 // ══════════════════════════════════════════════════════════════════════════
 
@@ -1478,12 +1172,6 @@ List<Color> _buildPalette(Color base, int count) {
 // ══════════════════════════════════════════════════════════════════════════
 //  Data classes
 // ══════════════════════════════════════════════════════════════════════════
-
-class _GemEntry {
-  final String name;
-  final int plays, listeners;
-  const _GemEntry({required this.name, required this.plays, required this.listeners});
-}
 
 class _TagEntry {
   final String name;

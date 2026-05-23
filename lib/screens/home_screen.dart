@@ -14,6 +14,8 @@ import '../l10n.dart';
 import '../services/lastfm_service.dart';
 import '../services/image_service.dart';
 import '../services/update_service.dart';
+import '../services/data_cache.dart';
+import '../services/prefetch_service.dart';
 
 // ── Sous-pages de paramètres ──────────────────────────────────────────────────
 import 'settings/appearance_page.dart';
@@ -81,6 +83,10 @@ class _HomeScreenState extends State<HomeScreen> {
     _idx     = widget.startupTab.clamp(0, 5);
     _service = LastFmService(apiKey: widget.apiKey, username: widget.username);
     localeNotifier.addListener(_onLocaleChange);
+    // Initialiser le cache puis lancer le préchargement en arrière-plan
+    DataCache.init().then((_) {
+      PrefetchService.prefetchAll(_service);
+    });
   }
 
   @override

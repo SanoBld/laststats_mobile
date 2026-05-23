@@ -87,6 +87,7 @@ class _DashboardPageState extends State<_DashboardPage> {
   bool   _showTracks            = true;
 
   // ── Friends state ───────────────────────────────────────
+
   bool             _showFriends   = true;
   List<_FriendData> _friends      = [];
   Set<String>      _favFriends    = {};
@@ -96,12 +97,82 @@ class _DashboardPageState extends State<_DashboardPage> {
   @override
   void initState() {
     super.initState();
-    _loadPrefs().then((_) => _load());
+    // Charge prefs + cache en parallèle → affichage immédiat
+    _initWithCache();
     _npTimer = Timer.periodic(const Duration(seconds: 10), (_) => _refreshLive());
   }
 
   @override
   void dispose() { _npTimer?.cancel(); super.dispose(); }
+
+  // ── Initialisation avec cache en mémoire ─────────────────
+  /// Charge les préférences et le cache simultanément.
+  /// Si le cache contient des données valides, les affiche immédiatement
+  /// puis lance un refresh réseau en arrière-plan (silencieux).
+  Future<void> _initWithCache() async {
+    await _loadPrefs();
+    if (!mounted) return;
+
+    // Tenter un affichage instantané depuis le cache
+    final gotCache = _loadFromCache();
+    if (gotCache) {
+      // Données affichées → refresh silencieux en arrière-plan
+      _resolveHeaderImage();
+      if (_showFriends) _loadFriends();
+      _load(silent: true);
+    } else {
+      // Pas de cache → chargement normal avec indicateur
+      _load();
+    }
+  }
+
+  /// Lit les données du cache mémoire (synchrone et instantané).
+  /// Retourne true si des données utilisables ont été trouvées.
+  bool _loadFromCache() {
+    final userInfo = DataCache.getSync(DataCache.keyUserInfo());
+    if (userInfo == null) return false; // pas de cache → bail out
+
+    final topArtists    = DataCache.getSync(DataCache.keyTopArtists('overall')) as List?;
+    final topAlbums     = DataCache.getSync(DataCache.keyTopAlbums('overall'))  as List?;
+    final topTracks     = DataCache.getSync(DataCache.keyTopTracks('overall'))  as List?;
+    final recentRaw     = DataCache.getSync(DataCache.keyRecentTracks(limit: 10));
+    final topArtW       = DataCache.getSync(DataCache.keyTopArtists('7day'))    as List?;
+    final topAlbW       = DataCache.getSync(DataCache.keyTopAlbums('7day'))     as List?;
+    final topTrkW       = DataCache.getSync(DataCache.keyTopTracks('7day'))     as List?;
+
+    // Séparer nowplaying des pistes récentes
+    Map<String, dynamic>? np;
+    final recentF = <dynamic>[];
+    if (recentRaw is Map) {
+      final trackRaw = recentRaw['track'];
+      final allRecent = trackRaw is List
+          ? trackRaw
+          : (trackRaw != null ? [trackRaw] : <dynamic>[]);
+      for (final t in allRecent) {
+        if ((t as Map?)?['@attr']?['nowplaying'] == 'true') {
+          np = t as Map<String, dynamic>;
+        } else {
+          recentF.add(t);
+        }
+      }
+    }
+
+    setState(() {
+      _userInfo        = userInfo as Map<String, dynamic>;
+      _topArtists      = topArtists  ?? [];
+      _topAlbums       = topAlbums   ?? [];
+      _topTracks       = topTracks   ?? [];
+      _recentTracks    = recentF;
+      _nowPlaying      = np;
+      _topArtistsWeek  = topArtW     ?? [];
+      _topAlbumsWeek   = topAlbW     ?? [];
+      _topTracksWeek   = topTrkW     ?? [];
+      _loading         = false;
+    });
+
+    if (np != null) _extractColor(np);
+    return true;
+  }
 
   Future<void> _loadPrefs() async {
     final p = await SharedPreferences.getInstance();
@@ -128,8 +199,9 @@ class _DashboardPageState extends State<_DashboardPage> {
     });
   }
 
-  Future<void> _load() async {
-    setState(() { _loading = true; _error = null; });
+  /// [silent] = true → pas de skeleton, mise à jour discrète en arrière-plan.
+  Future<void> _load({bool silent = false}) async {
+    if (!silent) setState(() { _loading = true; _error = null; });
     try {
       final res = await Future.wait([
         widget.service.getUserInfo(),
@@ -161,6 +233,7 @@ class _DashboardPageState extends State<_DashboardPage> {
         if ((t as Map?)?['@attr']?['nowplaying'] == 'true') { np = t as Map<String, dynamic>; }
         else { recentF.add(t); }
       }
+      if (!mounted) return;
       setState(() {
         _userInfo     = res[0] as Map<String, dynamic>?;
         _topArtists   = res[1] as List<dynamic>;
@@ -175,10 +248,35 @@ class _DashboardPageState extends State<_DashboardPage> {
       });
       if (_nowPlaying != null) _extractColor(_nowPlaying!);
       _resolveHeaderImage();
+      // Persister en cache
+      _saveToCache(res);
       // Load friends asynchronously — does not block the main page
       if (_showFriends) _loadFriends();
     } catch (e) {
-      setState(() { _error = e.toString().replaceFirst('Exception: ', ''); _loading = false; });
+      if (!mounted) return;
+      if (!silent) {
+        setState(() { _error = e.toString().replaceFirst('Exception: ', ''); _loading = false; });
+      }
+      // En mode silencieux, on garde les données en cache sans afficher d'erreur
+    }
+  }
+
+  /// Persiste les résultats API dans le cache pour les prochains démarrages.
+  void _saveToCache(List<dynamic> res) {
+    // Fire-and-forget
+    DataCache.set(DataCache.keyUserInfo(),            res[0]);
+    DataCache.set(DataCache.keyTopArtists('overall'), res[1]);
+    DataCache.set(DataCache.keyTopAlbums('overall'),  res[2]);
+    DataCache.set(DataCache.keyTopTracks('overall'),  res[3]);
+    DataCache.set(DataCache.keyRecentTracks(limit: 10), res[4]);
+    if (res.length > 6 && (res[6] as List).isNotEmpty) {
+      DataCache.set(DataCache.keyTopArtists('7day'), res[6]);
+    }
+    if (res.length > 7 && (res[7] as List).isNotEmpty) {
+      DataCache.set(DataCache.keyTopAlbums('7day'),  res[7]);
+    }
+    if (res.length > 8 && (res[8] as List).isNotEmpty) {
+      DataCache.set(DataCache.keyTopTracks('7day'),  res[8]);
     }
   }
 
@@ -188,7 +286,10 @@ class _DashboardPageState extends State<_DashboardPage> {
       final np = await widget.service.getNowPlaying();
       if (mounted) {
         setState(() => _nowPlaying = np);
-        if (np != null) _extractColor(np);
+        if (np != null) {
+          _extractColor(np);
+          DataCache.set(DataCache.keyNowPlaying(), np);
+        }
         _resolveHeaderImage();
       }
     } catch (_) {}
@@ -196,7 +297,6 @@ class _DashboardPageState extends State<_DashboardPage> {
     if (_showFriends && mounted) _loadFriends(silent: true);
   }
 
-  // ── Friends loader ───────────────────────────────────────
   // [silent] = true → refresh in background without showing skeleton
   Future<void> _loadFriends({bool silent = false}) async {
     if (!mounted) return;

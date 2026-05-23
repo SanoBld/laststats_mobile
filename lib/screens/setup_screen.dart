@@ -2,9 +2,16 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../app_state.dart';
 import '../l10n.dart';
 import '../services/lastfm_service.dart';
+import '../services/data_cache.dart';
+import '../services/prefetch_service.dart';
 import 'home_screen.dart';
+
+// ══════════════════════════════════════════════════════════════════════════
+//  SetupScreen — credentials entry
+// ══════════════════════════════════════════════════════════════════════════
 
 class SetupScreen extends StatefulWidget {
   const SetupScreen({super.key});
@@ -82,10 +89,18 @@ class _SetupScreenState extends State<SetupScreen> {
         await prefs.setString('ls_apikey',   apiKey);
       }
 
+      final totalScrobbles =
+          int.tryParse(userInfo['playcount']?.toString() ?? '0') ?? 0;
+
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => HomeScreen(username: username, apiKey: apiKey),
+          builder: (_) => _FirstLoadScreen(
+            username:        username,
+            apiKey:          apiKey,
+            service:         service,
+            totalScrobbles:  totalScrobbles,
+          ),
         ),
       );
     } catch (e) {
@@ -344,5 +359,239 @@ class _SetupScreenState extends State<SetupScreen> {
         ),
       ),
     );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  _FirstLoadScreen — shown once on first connection to prefetch all data
+// ══════════════════════════════════════════════════════════════════════════
+
+class _FirstLoadScreen extends StatefulWidget {
+  final String username;
+  final String apiKey;
+  final LastFmService service;
+  final int totalScrobbles;
+
+  const _FirstLoadScreen({
+    required this.username,
+    required this.apiKey,
+    required this.service,
+    required this.totalScrobbles,
+  });
+
+  @override
+  State<_FirstLoadScreen> createState() => _FirstLoadScreenState();
+}
+
+class _FirstLoadScreenState extends State<_FirstLoadScreen>
+    with SingleTickerProviderStateMixin {
+
+  late final AnimationController _pulseCtrl;
+  late final Animation<double>   _pulse;
+
+  // Steps shown to the user while loading
+  static const _steps = [
+    ('🎵', 'Chargement de ton profil…'),
+    ('📊', 'Récupération de tes top artistes…'),
+    ('💿', 'Récupération de tes top albums…'),
+    ('🎶', 'Récupération de tes top tracks…'),
+    ('🕐', 'Analyse des écoutes récentes…'),
+    ('📅', 'Construction du calendrier musical…'),
+    ('🏆', 'Calcul des classements…'),
+    ('✨', 'Finalisation…'),
+  ];
+
+  int    _stepIndex   = 0;
+  double _progress    = 0.0;
+  bool   _done        = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..repeat(reverse: true);
+    _pulse = Tween<double>(begin: 0.85, end: 1.0).animate(
+      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
+    );
+    _startPrefetch();
+  }
+
+  @override
+  void dispose() {
+    _pulseCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _startPrefetch() async {
+    // Animate steps while the real prefetch runs in background
+    final stepDuration = Duration(
+      milliseconds: (_steps.length > 0) ? 600 : 500,
+    );
+
+    // Kick off the actual data loading
+    final prefetchFuture = _runPrefetch();
+
+    // Cycle through visual steps at a steady pace
+    for (var i = 0; i < _steps.length; i++) {
+      if (!mounted) return;
+      setState(() {
+        _stepIndex = i;
+        _progress  = (i + 1) / _steps.length;
+      });
+      await Future.delayed(stepDuration);
+    }
+
+    // Wait for the real fetch to finish before navigating
+    await prefetchFuture;
+
+    if (!mounted) return;
+    setState(() { _done = true; _progress = 1.0; });
+
+    await Future.delayed(const Duration(milliseconds: 400));
+    if (!mounted) return;
+
+    Navigator.of(context).pushReplacement(
+      PageRouteBuilder(
+        pageBuilder: (_, anim, __) => HomeScreen(
+          username: widget.username,
+          apiKey:   widget.apiKey,
+        ),
+        transitionsBuilder: (_, anim, __, child) =>
+            FadeTransition(opacity: anim, child: child),
+        transitionDuration: const Duration(milliseconds: 500),
+      ),
+    );
+  }
+
+  Future<void> _runPrefetch() async {
+    try {
+      await DataCache.init();
+      await PrefetchService.prefetchAll(widget.service, force: true);
+    } catch (_) {
+      // Non-blocking: app works fine without prefetch
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text   = Theme.of(context).textTheme;
+    final step   = _steps[_stepIndex.clamp(0, _steps.length - 1)];
+
+    return Scaffold(
+      backgroundColor: scheme.surface,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+
+              // ── Pulsing icon ──────────────────────────────────────────
+              ScaleTransition(
+                scale: _pulse,
+                child: Container(
+                  width: 96, height: 96,
+                  decoration: BoxDecoration(
+                    color: scheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(28),
+                    boxShadow: [
+                      BoxShadow(
+                        color:  scheme.primary.withValues(alpha: 0.25),
+                        blurRadius: 24,
+                        spreadRadius: 4,
+                      ),
+                    ],
+                  ),
+                  child: Icon(Icons.headphones_rounded,
+                      size: 48, color: scheme.onPrimaryContainer),
+                ),
+              ),
+              const SizedBox(height: 36),
+
+              // ── Title ─────────────────────────────────────────────────
+              Text('LastStats',
+                  style: text.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.w800, color: scheme.primary)),
+              const SizedBox(height: 8),
+              Text(
+                'Bienvenue, ${widget.username} !',
+                style: text.titleMedium?.copyWith(color: scheme.onSurface),
+              ),
+              if (widget.totalScrobbles > 0) ...[
+                const SizedBox(height: 4),
+                Text(
+                  '${_fmtLarge(widget.totalScrobbles)} scrobbles à analyser',
+                  style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                ),
+              ],
+              const SizedBox(height: 48),
+
+              // ── Progress bar ──────────────────────────────────────────
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: LinearProgressIndicator(
+                  value: _progress,
+                  minHeight: 8,
+                  backgroundColor: scheme.surfaceContainerHighest,
+                  valueColor: AlwaysStoppedAnimation<Color>(scheme.primary),
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // ── Current step ──────────────────────────────────────────
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 300),
+                child: Row(
+                  key: ValueKey(_stepIndex),
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(step.$1, style: const TextStyle(fontSize: 18)),
+                    const SizedBox(width: 10),
+                    Flexible(
+                      child: Text(
+                        _done ? '✅ Tout est prêt !' : step.$2,
+                        style: text.bodyMedium?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                            fontWeight: FontWeight.w500),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 48),
+
+              // ── Tip ───────────────────────────────────────────────────
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(children: [
+                  Icon(Icons.lightbulb_outline_rounded,
+                      size: 16, color: scheme.primary),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(
+                    'Chargement unique — tes données seront mises en cache pour une expérience instantanée.',
+                    style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                  )),
+                ]),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  static String _fmtLarge(int n) {
+    if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
+    if (n >= 1000)    return '${(n / 1000).toStringAsFixed(1)}k';
+    return n.toString();
   }
 }

@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'app_state.dart';
 import 'screens/setup_screen.dart';
 import 'screens/home_screen.dart';
+import 'services/data_cache.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -17,6 +18,10 @@ void main() async {
   accentNotifier.value             = accentFromString(prefs.getString('ls_accent'));
   useDynamicColorNotifier.value    = prefs.getBool('ls_use_dynamic_color')    ?? false;
   useNowPlayingColorNotifier.value = prefs.getBool('ls_use_nowplaying_color') ?? false;
+
+  // Initialiser le cache et nettoyer les entrées expirées
+  await DataCache.init();
+  await DataCache.clearExpired();
   localeNotifier.value             = prefs.getString('ls_locale') ?? 'fr';
 
   runApp(LastStatsApp(
