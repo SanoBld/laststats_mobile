@@ -473,14 +473,21 @@ class _LangChip extends StatelessWidget {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-//  _FirstLoadScreen — shown once on first connection to prefetch all data
+//  _FirstLoadScreen — affiché UNE SEULE FOIS à la première connexion
+//
+//  • Écoute [PrefetchService.progressNotifier] pour afficher en temps réel
+//    les 12 étapes de l'import (tops toutes périodes, mensuel, loved…)
+//  • Checklist animée : ✓ étapes terminées, ⏳ étape active, barre de progression
+//  • Compteur de scrobbles affiché pendant le chargement
+//  • Navigue vers HomeScreen dès que l'import est complet (600 ms de délai
+//    pour que l'état "Importé !" soit visible)
 // ══════════════════════════════════════════════════════════════════════════
 
 class _FirstLoadScreen extends StatefulWidget {
-  final String username;
-  final String apiKey;
+  final String      username;
+  final String      apiKey;
   final LastFmService service;
-  final int totalScrobbles;
+  final int         totalScrobbles;
 
   const _FirstLoadScreen({
     required this.username,
@@ -496,125 +503,95 @@ class _FirstLoadScreen extends StatefulWidget {
 class _FirstLoadScreenState extends State<_FirstLoadScreen>
     with TickerProviderStateMixin {
 
-  late final AnimationController _pulseCtrl;
-  late final Animation<double>   _pulse;
   late final AnimationController _fadeCtrl;
   late final Animation<double>   _fade;
+  late final AnimationController _pulseCtrl;
+  late final Animation<double>   _pulse;
 
-  static List<(String, String)> get _steps => localeNotifier.value == 'en'
-      ? [
-          ('🎵', 'Loading your profile…'),
-          ('📊', 'Fetching your top artists…'),
-          ('💿', 'Fetching your top albums…'),
-          ('🎶', 'Fetching your top tracks…'),
-          ('🕐', 'Analysing recent plays…'),
-          ('📅', 'Building your music calendar…'),
-          ('🏆', 'Computing rankings…'),
-          ('✨', 'Finishing up…'),
-        ]
-      : [
-          ('🎵', 'Chargement de ton profil…'),
-          ('📊', 'Récupération de tes top artistes…'),
-          ('💿', 'Récupération de tes top albums…'),
-          ('🎶', 'Récupération de tes top tracks…'),
-          ('🕐', 'Analyse des écoutes récentes…'),
-          ('📅', 'Construction du calendrier musical…'),
-          ('🏆', 'Calcul des classements…'),
-          ('✨', 'Finalisation…'),
-        ];
-
-  int    _stepIndex   = 0;
-  double _progress    = 0.0;
-  bool   _done        = false;
+  PrefetchState _state = const PrefetchState(
+    currentStep: '', fraction: 0, completedSteps: [], isComplete: false,
+  );
+  bool _navigated = false;
 
   @override
   void initState() {
     super.initState();
 
-    _pulseCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1400),
-    )..repeat(reverse: true);
-    _pulse = Tween<double>(begin: 0.88, end: 1.0).animate(
-      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
-    );
-
+    // Fade-in
     _fadeCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 600),
-    );
+        vsync: this, duration: const Duration(milliseconds: 600));
     _fade = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
     _fadeCtrl.forward();
 
-    _startPrefetch();
+    // Pulsing icon
+    _pulseCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 1400))
+      ..repeat(reverse: true);
+    _pulse = Tween<double>(begin: 0.92, end: 1.0).animate(
+        CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
+
+    // Écoute la progression
+    PrefetchService.progressNotifier.addListener(_onProgress);
+
+    // Lance l'import complet avec suivi (force: true → toujours re-fetcher)
+    PrefetchService.prefetchAllWithProgress(widget.service, force: true);
+  }
+
+  void _onProgress() {
+    if (!mounted) return;
+    setState(() => _state = PrefetchService.progressNotifier.value);
+    if (_state.isComplete) _scheduleNavigation();
+  }
+
+  void _scheduleNavigation() {
+    if (_navigated) return;
+    _navigated = true;
+    // Délai court pour laisser le temps de voir "Importé !"
+    Future.delayed(const Duration(milliseconds: 650), () {
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        PageRouteBuilder(
+          pageBuilder: (_, __, ___) => HomeScreen(
+            username:   widget.username,
+            apiKey:     widget.apiKey,
+          ),
+          transitionsBuilder: (_, anim, __, child) {
+            final curved = CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);
+            return SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(0.0, 0.06),
+                end:   Offset.zero,
+              ).animate(curved),
+              child: FadeTransition(opacity: curved, child: child),
+            );
+          },
+          transitionDuration: const Duration(milliseconds: 550),
+        ),
+      );
+    });
   }
 
   @override
   void dispose() {
-    _pulseCtrl.dispose();
     _fadeCtrl.dispose();
+    _pulseCtrl.dispose();
+    PrefetchService.progressNotifier.removeListener(_onProgress);
     super.dispose();
   }
 
-  Future<void> _startPrefetch() async {
-    final steps = _steps;
-    final stepDuration = Duration(milliseconds: 650);
+  String _t(String fr, String en) =>
+      localeNotifier.value == 'en' ? en : fr;
 
-    // Real prefetch runs concurrently
-    final prefetchFuture = _runPrefetch();
-
-    for (var i = 0; i < steps.length; i++) {
-      if (!mounted) return;
-      setState(() {
-        _stepIndex = i;
-        _progress  = (i + 1) / steps.length;
-      });
-      await Future.delayed(stepDuration);
-    }
-
-    await prefetchFuture;
-
-    if (!mounted) return;
-    setState(() { _done = true; _progress = 1.0; });
-
-    // Brief pause to show "done" state, then fade+slide to HomeScreen
-    await Future.delayed(const Duration(milliseconds: 500));
-    if (!mounted) return;
-
-    Navigator.of(context).pushReplacement(
-      PageRouteBuilder(
-        pageBuilder: (_, __, ___) => HomeScreen(
-          username: widget.username,
-          apiKey:   widget.apiKey,
-        ),
-        transitionsBuilder: (_, anim, __, child) {
-          final curved = CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);
-          return SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(0.0, 0.06),
-              end:   Offset.zero,
-            ).animate(curved),
-            child: FadeTransition(opacity: curved, child: child),
-          );
-        },
-        transitionDuration: const Duration(milliseconds: 550),
-      ),
-    );
-  }
-
-  Future<void> _runPrefetch() async {
-    try {
-      await DataCache.init();
-      await PrefetchService.prefetchAll(widget.service, force: true);
-    } catch (_) {}
+  static String _fmtLarge(int n) {
+    if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
+    if (n >= 1000)    return '${(n / 1000).toStringAsFixed(1)}k';
+    return n.toString();
   }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final text   = Theme.of(context).textTheme;
-    final steps  = _steps;
-    final step   = steps[_stepIndex.clamp(0, steps.length - 1)];
     final isEn   = localeNotifier.value == 'en';
 
     return Scaffold(
@@ -623,127 +600,141 @@ class _FirstLoadScreenState extends State<_FirstLoadScreen>
         opacity: _fade,
         child: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
 
-                // ── Pulsing icon ──────────────────────────────────────────
+                const Spacer(flex: 2),
+
+                // ── Icône pulsante ────────────────────────────────────────
                 ScaleTransition(
                   scale: _pulse,
                   child: Container(
-                    width: 96, height: 96,
+                    width: 88, height: 88,
                     decoration: BoxDecoration(
                       color: scheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(28),
+                      borderRadius: BorderRadius.circular(26),
                       boxShadow: [
                         BoxShadow(
-                          color:  scheme.primary.withValues(alpha: 0.25),
-                          blurRadius: 24,
+                          color:      scheme.primary.withValues(alpha: 0.22),
+                          blurRadius: 28,
                           spreadRadius: 4,
                         ),
                       ],
                     ),
                     child: Icon(Icons.headphones_rounded,
-                        size: 48, color: scheme.onPrimaryContainer),
+                        size: 44, color: scheme.onPrimaryContainer),
                   ),
                 ),
-                const SizedBox(height: 36),
+                const SizedBox(height: 24),
 
-                // ── Title ─────────────────────────────────────────────────
+                // ── Titre + bienvenue ─────────────────────────────────────
                 Text('LastStats',
                     style: text.headlineMedium?.copyWith(
                         fontWeight: FontWeight.w800, color: scheme.primary)),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 Text(
                   isEn ? 'Welcome, ${widget.username}!'
                        : 'Bienvenue, ${widget.username}\u00a0!',
-                  style: text.titleMedium?.copyWith(color: scheme.onSurface),
+                  style: text.titleMedium?.copyWith(
+                      color: scheme.onSurface, fontWeight: FontWeight.w600),
                 ),
+
+                // ── Badge compteur de scrobbles ───────────────────────────
                 if (widget.totalScrobbles > 0) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    isEn
-                        ? '${_fmtLarge(widget.totalScrobbles)} scrobbles to analyse'
-                        : '${_fmtLarge(widget.totalScrobbles)} scrobbles à analyser',
-                    style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: scheme.secondaryContainer,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.library_music_rounded,
+                          size: 14, color: scheme.onSecondaryContainer),
+                      const SizedBox(width: 7),
+                      Text(
+                        isEn
+                            ? '${_fmtLarge(widget.totalScrobbles)} scrobbles to import'
+                            : '${_fmtLarge(widget.totalScrobbles)} scrobbles à importer',
+                        style: text.labelMedium?.copyWith(
+                            color: scheme.onSecondaryContainer,
+                            fontWeight: FontWeight.w700),
+                      ),
+                    ]),
                   ),
                 ],
-                const SizedBox(height: 48),
 
-                // ── Progress bar ──────────────────────────────────────────
-                TweenAnimationBuilder<double>(
-                  tween: Tween<double>(begin: 0, end: _progress),
-                  duration: const Duration(milliseconds: 500),
-                  curve: Curves.easeOutCubic,
-                  builder: (_, v, __) => ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: LinearProgressIndicator(
-                      value: v,
-                      minHeight: 8,
-                      backgroundColor: scheme.surfaceContainerHighest,
-                      valueColor: AlwaysStoppedAnimation<Color>(scheme.primary),
+                const Spacer(flex: 2),
+
+                // ── Checklist temps réel ──────────────────────────────────
+                _FirstLoadChecklist(
+                  state:  _state,
+                  scheme: scheme,
+                  text:   text,
+                  t:      _t,
+                ),
+                const SizedBox(height: 22),
+
+                // ── Barre de progression ──────────────────────────────────
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(100),
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween(begin: 0, end: _state.fraction),
+                    duration: const Duration(milliseconds: 400),
+                    curve: Curves.easeOutCubic,
+                    builder: (_, v, __) => LinearProgressIndicator(
+                      value:      v,
+                      minHeight:  6,
+                      backgroundColor: scheme.surfaceContainerHigh,
+                      valueColor: AlwaysStoppedAnimation(scheme.primary),
                     ),
                   ),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 10),
 
-                // ── Current step ──────────────────────────────────────────
+                // ── Étape courante (légende sous la barre) ────────────────
                 AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 300),
-                  transitionBuilder: (child, anim) => FadeTransition(
-                    opacity: anim,
-                    child: SlideTransition(
-                      position: Tween<Offset>(
-                        begin: const Offset(0, 0.3),
-                        end:   Offset.zero,
-                      ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOut)),
-                      child: child,
-                    ),
-                  ),
-                  child: Row(
-                    key: ValueKey(_done ? 'done' : _stepIndex),
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(_done ? '✅' : step.$1,
-                          style: const TextStyle(fontSize: 18)),
-                      const SizedBox(width: 10),
-                      Flexible(
-                        child: Text(
-                          _done
-                              ? (isEn ? 'All set!' : 'Tout est prêt\u00a0!')
-                              : step.$2,
-                          style: text.bodyMedium?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                              fontWeight: FontWeight.w500),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    ],
+                  duration: const Duration(milliseconds: 220),
+                  transitionBuilder: (child, anim) =>
+                      FadeTransition(opacity: anim, child: child),
+                  child: Text(
+                    _state.isComplete
+                        ? _t('✨ Import terminé !', '✨ Import complete!')
+                        : _state.currentStep.isEmpty
+                            ? _t('Connexion à Last.fm…', 'Connecting to Last.fm…')
+                            : _state.currentStep,
+                    key: ValueKey(_state.isComplete ? 'done' : _state.currentStep),
+                    style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                    textAlign: TextAlign.center,
                   ),
                 ),
 
-                const SizedBox(height: 48),
+                const Spacer(flex: 1),
 
-                // ── Tip ───────────────────────────────────────────────────
+                // ── Note "import unique" ──────────────────────────────────
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
-                    color: scheme.surfaceContainerHighest,
+                    color: scheme.surfaceContainerLow,
                     borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                        color: scheme.outlineVariant.withValues(alpha: 0.5)),
                   ),
                   child: Row(children: [
-                    Icon(Icons.lightbulb_outline_rounded,
-                        size: 16, color: scheme.primary),
+                    Icon(Icons.bolt_rounded, size: 15, color: scheme.tertiary),
                     const SizedBox(width: 10),
                     Expanded(child: Text(
                       isEn
-                          ? 'One-time load — your data will be cached for an instant experience next time.'
-                          : 'Chargement unique — tes données seront mises en cache pour une expérience instantanée.',
-                      style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                          ? 'One-time import — future launches will be instant.'
+                          : 'Import unique — les prochains lancements seront instantanés.',
+                      style: text.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant),
                     )),
                   ]),
                 ),
+                const SizedBox(height: 8),
               ],
             ),
           ),
@@ -751,10 +742,176 @@ class _FirstLoadScreenState extends State<_FirstLoadScreen>
       ),
     );
   }
+}
 
-  static String _fmtLarge(int n) {
-    if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
-    if (n >= 1000)    return '${(n / 1000).toStringAsFixed(1)}k';
-    return n.toString();
+// ══════════════════════════════════════════════════════════════════════════
+//  _FirstLoadChecklist — checklist animée des étapes d'import
+// ══════════════════════════════════════════════════════════════════════════
+
+class _FirstLoadChecklist extends StatelessWidget {
+  final PrefetchState state;
+  final ColorScheme   scheme;
+  final TextTheme     text;
+  final String Function(String fr, String en) t;
+
+  const _FirstLoadChecklist({
+    required this.state,
+    required this.scheme,
+    required this.text,
+    required this.t,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasContent = state.completedSteps.isNotEmpty ||
+        state.currentStep.isNotEmpty;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 350),
+      curve: Curves.easeOut,
+      width: double.infinity,
+      constraints: const BoxConstraints(maxHeight: 340),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+            color: scheme.outlineVariant.withValues(alpha: 0.55)),
+      ),
+      child: hasContent
+          ? SingleChildScrollView(
+              physics: const NeverScrollableScrollPhysics(),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // En-tête
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Text(
+                      t('Import de tes données', 'Importing your data'),
+                      style: text.labelMedium?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                  ),
+
+                  // Étapes complètes
+                  ...state.completedSteps.map((label) => _StepRow(
+                    label:  label,
+                    status: _RowStatus.done,
+                    scheme: scheme,
+                    text:   text,
+                  )),
+
+                  // Étape active
+                  if (state.currentStep.isNotEmpty && !state.isComplete)
+                    _StepRow(
+                      label:  state.currentStep,
+                      status: _RowStatus.active,
+                      scheme: scheme,
+                      text:   text,
+                    ),
+
+                  // Message final
+                  if (state.isComplete)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Row(children: [
+                        Icon(Icons.rocket_launch_rounded,
+                            size: 15, color: scheme.primary),
+                        const SizedBox(width: 8),
+                        Text(
+                          t('Importé !', 'Imported!'),
+                          style: text.bodySmall?.copyWith(
+                              color: scheme.primary,
+                              fontWeight: FontWeight.w700),
+                        ),
+                      ]),
+                    ),
+                ],
+              ),
+            )
+          // Placeholder avant la 1ère étape
+          : Row(children: [
+              SizedBox(
+                width: 16, height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.2,
+                  valueColor: AlwaysStoppedAnimation(scheme.primary),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                t('Connexion à Last.fm…', 'Connecting to Last.fm…'),
+                style: text.bodyMedium?.copyWith(
+                    color: scheme.onSurfaceVariant),
+              ),
+            ]),
+    );
+  }
+}
+
+// ── Ligne d'étape ─────────────────────────────────────────────────────────────
+
+enum _RowStatus { done, active }
+
+class _StepRow extends StatelessWidget {
+  final String      label;
+  final _RowStatus  status;
+  final ColorScheme scheme;
+  final TextTheme   text;
+
+  const _StepRow({
+    required this.label,
+    required this.status,
+    required this.scheme,
+    required this.text,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDone = status == _RowStatus.done;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(children: [
+        // Icône de statut
+        SizedBox(
+          width: 18, height: 18,
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 280),
+            transitionBuilder: (child, anim) =>
+                ScaleTransition(scale: anim, child: child),
+            child: isDone
+                ? Icon(Icons.check_circle_rounded,
+                    size: 18, color: scheme.primary,
+                    key: const ValueKey('done'))
+                : CircularProgressIndicator(
+                    strokeWidth: 2.2,
+                    valueColor: AlwaysStoppedAnimation(scheme.primary),
+                    key: const ValueKey('active')),
+          ),
+        ),
+        const SizedBox(width: 10),
+
+        // Label
+        Expanded(
+          child: Text(
+            label,
+            style: text.bodyMedium?.copyWith(
+              color: isDone ? scheme.onSurface : scheme.primary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+
+        // Coche secondaire pour les étapes terminées
+        if (isDone)
+          Icon(Icons.check_rounded,
+              size: 14, color: scheme.primary.withValues(alpha: 0.6)),
+      ]),
+    );
   }
 }

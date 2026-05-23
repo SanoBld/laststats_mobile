@@ -1,3 +1,14 @@
+// lib/main.dart
+// ══════════════════════════════════════════════════════════════════════════
+//  Point d'entrée de l'application LastStats
+//
+//  Comportement au démarrage :
+//    • Credentials présents → HomeScreen directement (pas d'écran de chargement)
+//      Le préchargement en arrière-plan est lancé depuis HomeScreen.initState.
+//    • Premiers accès → SetupScreen → _FirstLoadScreen (import complet avec
+//      progression détaillée) → HomeScreen.
+// ══════════════════════════════════════════════════════════════════════════
+
 import 'package:flutter/material.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -5,6 +16,7 @@ import 'app_state.dart';
 import 'screens/setup_screen.dart';
 import 'screens/home_screen.dart';
 import 'services/data_cache.dart';
+import 'services/image_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -14,15 +26,19 @@ void main() async {
   final apiKey     = prefs.getString('ls_apikey')   ?? '';
   final startupTab = prefs.getInt('ls_startup_tab') ?? 0;
 
+  // ── Paramètres d'apparence ──────────────────────────────────────────────
   themeModeNotifier.value          = themeFromString(prefs.getString('ls_theme'));
   accentNotifier.value             = accentFromString(prefs.getString('ls_accent'));
   useDynamicColorNotifier.value    = prefs.getBool('ls_use_dynamic_color')    ?? false;
   useNowPlayingColorNotifier.value = prefs.getBool('ls_use_nowplaying_color') ?? false;
+  localeNotifier.value             = prefs.getString('ls_locale') ?? 'fr';
 
-  // Initialiser le cache et nettoyer les entrées expirées
+  // ── Cache de données scrobble ────────────────────────────────────────────
   await DataCache.init();
   await DataCache.clearExpired();
-  localeNotifier.value             = prefs.getString('ls_locale') ?? 'fr';
+
+  // ── Cache d'images (nettoyage non-bloquant) ──────────────────────────────
+  ImageService.pruneExpired();
 
   runApp(LastStatsApp(
     username:   username,
@@ -30,6 +46,10 @@ void main() async {
     startupTab: startupTab,
   ));
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+//  LastStatsApp
+// ══════════════════════════════════════════════════════════════════════════
 
 class LastStatsApp extends StatelessWidget {
   final String username;
@@ -56,26 +76,27 @@ class LastStatsApp extends StatelessWidget {
                 return ValueListenableBuilder<ThemeMode>(
                   valueListenable: themeModeNotifier,
                   builder: (_, mode, _) {
-                    // Rebuild when language changes so navigation labels update
                     return ValueListenableBuilder<String>(
                       valueListenable: localeNotifier,
                       builder: (_, _, _) {
-                        final ColorScheme lightScheme = (useDynamic && lightDynamic != null)
-                            ? lightDynamic.harmonized()
-                            : ColorScheme.fromSeed(
-                                seedColor:  accent,
-                                brightness: Brightness.light,
-                              );
+                        final ColorScheme lightScheme =
+                            (useDynamic && lightDynamic != null)
+                                ? lightDynamic.harmonized()
+                                : ColorScheme.fromSeed(
+                                    seedColor:  accent,
+                                    brightness: Brightness.light,
+                                  );
 
-                        final ColorScheme darkScheme = (useDynamic && darkDynamic != null)
-                            ? darkDynamic.harmonized()
-                            : ColorScheme.fromSeed(
-                                seedColor:  accent,
-                                brightness: Brightness.dark,
-                              );
+                        final ColorScheme darkScheme =
+                            (useDynamic && darkDynamic != null)
+                                ? darkDynamic.harmonized()
+                                : ColorScheme.fromSeed(
+                                    seedColor:  accent,
+                                    brightness: Brightness.dark,
+                                  );
 
                         return MaterialApp(
-                          title: 'LastStats',
+                          title:                     'LastStats',
                           debugShowCheckedModeBanner: false,
                           theme: ThemeData(
                             colorScheme: lightScheme,
@@ -86,6 +107,9 @@ class LastStatsApp extends StatelessWidget {
                             useMaterial3: true,
                           ),
                           themeMode: mode,
+                          // ── Routing ─────────────────────────────────────
+                          // Credentials présents → HomeScreen directement.
+                          // Le prefetch en arrière-plan est géré par HomeScreen.
                           home: (username.isNotEmpty && apiKey.isNotEmpty)
                               ? HomeScreen(
                                   username:   username,

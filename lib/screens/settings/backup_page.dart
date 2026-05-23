@@ -22,6 +22,7 @@ class _BackupPageState extends State<BackupPage> {
     'ls_header_source', 'ls_header_period', 'ls_header_animation',
     'ls_header_blur', 'ls_header_custom_url',
     'ls_header_fallback_enabled', 'ls_header_fallback_url',
+    'ls_header_fallback_type', 'ls_header_fallback_period',
     'ls_show_nowplay', 'ls_show_stats', 'ls_show_artists', 'ls_show_tracks', 'ls_show_friends',
     'ls_stat_cards',
     'ls_startup_tab', 'ls_auto_update_check',

@@ -1,104 +1,248 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
-
+// lib/services/image_service.dart
 // ══════════════════════════════════════════════════════════════════════════
-//  ImageService — résolution multi-sources avec cache en mémoire
-//  Chaîne de fallback :
+//  ImageService — résolution multi-sources avec cache bicouche
+//
+//  Nouveautés v2 :
+//    • Cache persistant sur disque (SharedPreferences) avec TTL 7 jours
+//    • Cache mémoire (session) — accès instantané, toujours prioritaire
+//    • Deux couches transparentes : mémoire → disque → réseau → disque+mémoire
+//
+//  Chaîne de fallback (réseau) :
 //    1. URL Last.fm (si non-placeholder)
 //    2. iTunes Search API  (pas de clé, rate-limit généreux)
 //    3. Deezer API         (pas de clé — artistes uniquement)
 //    4. MusicBrainz + Cover Art Archive (albums)
+//
+//  Clés de cache disque :
+//    Préfixe : "imgcache_"
+//    Format  : "imgcache_artist|Radiohead"
+//              "imgcache_album|Radiohead|The Bends"
+//              "imgcache_track|Radiohead|Creep"
+//    Valeur  : JSON {"url":"https://…","ts":1714000000000}
+//    TTL     : 7 jours (604 800 000 ms) — les artworks changent rarement
 // ══════════════════════════════════════════════════════════════════════════
+
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 class ImageService {
   ImageService._();
 
-  static const _placeholder = '2a96cbd8b46e442fc41c2b86b821562f';
-  static const _timeout     = Duration(seconds: 6);
+  // ── Constantes ─────────────────────────────────────────────────────────────
+  static const _placeholder   = '2a96cbd8b46e442fc41c2b86b821562f';
+  static const _timeout       = Duration(seconds: 6);
+  static const _diskPrefix    = 'imgcache_';
+  static const _diskTtlMs     = 7 * 24 * 60 * 60 * 1000; // 7 jours
 
-  /// Cache global partagé pour toute la session.
-  static final Map<String, String> _cache = {};
+  // ── Cache mémoire (session) ────────────────────────────────────────────────
+  static final Map<String, String> _mem = {};
 
-  /// Nombre d'entrées en cache.
-  static int get cacheSize => _cache.length;
+  // ── Cache disque (SharedPreferences) ──────────────────────────────────────
+  static SharedPreferences? _prefs;
+  static bool               _diskLoaded = false;
 
-  /// Vide le cache d'images.
-  static void clearCache() => _cache.clear();
+  // ──────────────────────────────────────────────────────────────────────────
+  //  Initialisation du cache disque
+  // ──────────────────────────────────────────────────────────────────────────
 
-  // ──────────────────────────────────────────────────────────────────────
-  //  Public API
-  // ──────────────────────────────────────────────────────────────────────
+  /// Charge toutes les entrées non-expirées du disque en mémoire.
+  /// Appelé une seule fois, de manière paresseuse, à la première résolution.
+  static Future<void> _ensureDiskCache() async {
+    if (_diskLoaded) return;
+    _diskLoaded = true;
 
+    try {
+      _prefs ??= await SharedPreferences.getInstance();
+      final now = DateTime.now().millisecondsSinceEpoch;
+
+      for (final prefKey in _prefs!.getKeys()) {
+        if (!prefKey.startsWith(_diskPrefix)) continue;
+        final raw = _prefs!.getString(prefKey);
+        if (raw == null) continue;
+
+        try {
+          final entry = jsonDecode(raw) as Map<String, dynamic>;
+          final ts    = (entry['ts'] as num?)?.toInt() ?? 0;
+          final url   = (entry['url'] as String?) ?? '';
+
+          if (url.isEmpty || (now - ts) > _diskTtlMs) {
+            // Expiré → supprimer du disque silencieusement
+            unawaited(_prefs!.remove(prefKey));
+            continue;
+          }
+
+          // Entrée valide → charger en mémoire
+          final memKey = prefKey.substring(_diskPrefix.length);
+          _mem[memKey] = url;
+        } catch (_) {
+          unawaited(_prefs!.remove(prefKey));
+        }
+      }
+
+      debugLog('[ImageCache] ${_mem.length} URL(s) chargées depuis le disque.');
+    } catch (e) {
+      debugLog('[ImageCache] Erreur init disque : $e');
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  //  Lecture / écriture cache
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /// Retourne l'URL depuis le cache mémoire, ou null si absent.
+  static String? _getFromMem(String key) => _mem[key];
+
+  /// Persiste [url] dans le cache mémoire ET sur le disque.
+  static Future<String> _persist(String key, String url) async {
+    _mem[key] = url;
+    if (url.isEmpty) return url; // ne pas persister les vides
+
+    try {
+      _prefs ??= await SharedPreferences.getInstance();
+      await _prefs!.setString(
+        '$_diskPrefix$key',
+        jsonEncode({'url': url, 'ts': DateTime.now().millisecondsSinceEpoch}),
+      );
+    } catch (_) {}
+
+    return url;
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  //  API publique
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /// Résout l'image d'un artiste.
   static Future<String> resolveArtist(
     String artist, {
     String? lastfmUrl,
   }) async {
     if (_ok(lastfmUrl)) return lastfmUrl!;
+    await _ensureDiskCache();
+
     final key = 'artist|$artist';
-    if (_cache.containsKey(key)) return _cache[key]!;
+    final mem = _getFromMem(key);
+    if (mem != null) return mem;
 
     // 1 — iTunes
     final itunes = await _itunesSearch(artist, 'musicArtist', 'artistTerm');
-    if (itunes.isNotEmpty) return _put(key, itunes);
+    if (itunes.isNotEmpty) return _persist(key, itunes);
 
     // 2 — Deezer
     final deezer = await _deezerArtist(artist);
-    if (deezer.isNotEmpty) return _put(key, deezer);
+    if (deezer.isNotEmpty) return _persist(key, deezer);
 
-    return _put(key, '');
+    return _persist(key, '');
   }
 
+  /// Résout l'image de couverture d'un album.
   static Future<String> resolveAlbum(
     String album,
     String artist, {
     String? lastfmUrl,
   }) async {
     if (_ok(lastfmUrl)) return lastfmUrl!;
+    await _ensureDiskCache();
+
     final key = 'album|$artist|$album';
-    if (_cache.containsKey(key)) return _cache[key]!;
+    final mem = _getFromMem(key);
+    if (mem != null) return mem;
 
     // 1 — iTunes
     final itunes = await _itunesSearch('$artist $album', 'album');
-    if (itunes.isNotEmpty) return _put(key, itunes);
+    if (itunes.isNotEmpty) return _persist(key, itunes);
 
     // 2 — MusicBrainz + Cover Art Archive
     final mb = await _mbAlbum(album, artist);
-    if (mb.isNotEmpty) return _put(key, mb);
+    if (mb.isNotEmpty) return _persist(key, mb);
 
-    return _put(key, '');
+    return _persist(key, '');
   }
 
+  /// Résout l'artwork associé à un titre (artwork de l'album sur iTunes).
   static Future<String> resolveTrack(
     String track,
     String artist, {
     String? lastfmUrl,
   }) async {
     if (_ok(lastfmUrl)) return lastfmUrl!;
+    await _ensureDiskCache();
+
     final key = 'track|$artist|$track';
-    if (_cache.containsKey(key)) return _cache[key]!;
+    final mem = _getFromMem(key);
+    if (mem != null) return mem;
 
-    // 1 — iTunes (artwork de l'album associé)
+    // iTunes (artwork de l'album associé)
     final itunes = await _itunesSearch('$artist $track', 'song');
-    if (itunes.isNotEmpty) return _put(key, itunes);
+    if (itunes.isNotEmpty) return _persist(key, itunes);
 
-    return _put(key, '');
+    return _persist(key, '');
   }
 
-  // ──────────────────────────────────────────────────────────────────────
-  //  Helpers privés
-  // ──────────────────────────────────────────────────────────────────────
+  // ──────────────────────────────────────────────────────────────────────────
+  //  Cache stats
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /// Nombre d'entrées en cache mémoire (session).
+  static int get memCacheSize => _mem.length;
+
+  /// Vide uniquement le cache mémoire (le cache disque reste intact).
+  static void clearMemCache() => _mem.clear();
+
+  /// Vide le cache mémoire ET le cache disque.
+  static Future<void> clearAllCache() async {
+    _mem.clear();
+    try {
+      _prefs ??= await SharedPreferences.getInstance();
+      final keys = _prefs!.getKeys()
+          .where((k) => k.startsWith(_diskPrefix))
+          .toList();
+      for (final k in keys) await _prefs!.remove(k);
+    } catch (_) {}
+    debugLog('[ImageCache] Cache vidé.');
+  }
+
+  /// Supprime les entrées expirées du cache disque.
+  static Future<int> pruneExpired() async {
+    int removed = 0;
+    try {
+      _prefs ??= await SharedPreferences.getInstance();
+      final now  = DateTime.now().millisecondsSinceEpoch;
+      final keys = _prefs!.getKeys()
+          .where((k) => k.startsWith(_diskPrefix))
+          .toList();
+
+      for (final prefKey in keys) {
+        final raw = _prefs!.getString(prefKey);
+        if (raw == null) { await _prefs!.remove(prefKey); removed++; continue; }
+        try {
+          final entry = jsonDecode(raw) as Map<String, dynamic>;
+          final ts    = (entry['ts'] as num?)?.toInt() ?? 0;
+          if ((now - ts) > _diskTtlMs) {
+            await _prefs!.remove(prefKey);
+            final memKey = prefKey.substring(_diskPrefix.length);
+            _mem.remove(memKey);
+            removed++;
+          }
+        } catch (_) {
+          await _prefs!.remove(prefKey);
+          removed++;
+        }
+      }
+    } catch (_) {}
+    debugLog('[ImageCache] $removed entrée(s) expirée(s) supprimées.');
+    return removed;
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  //  Sources réseau
+  // ──────────────────────────────────────────────────────────────────────────
 
   static bool _ok(String? url) =>
-      url != null &&
-      url.isNotEmpty &&
-      !url.contains(_placeholder);
+      url != null && url.isNotEmpty && !url.contains(_placeholder);
 
-  static String _put(String key, String url) {
-    _cache[key] = url;
-    return url;
-  }
-
-  // ── iTunes Search ──────────────────────────────────────────────────────
+  // ── iTunes Search ──────────────────────────────────────────────────────────
   static Future<String> _itunesSearch(
     String term,
     String entity, [
@@ -121,7 +265,7 @@ class ImageService {
       final results = data['results'] as List?;
       if (results == null || results.isEmpty) return '';
 
-      // artworkUrl100 → remplace pour obtenir 600×600
+      // artworkUrl100 → upscale à 600×600
       final raw = (results.first['artworkUrl100'] ?? '').toString();
       return raw.isNotEmpty
           ? raw
@@ -133,7 +277,7 @@ class ImageService {
     }
   }
 
-  // ── Deezer (artistes) ──────────────────────────────────────────────────
+  // ── Deezer (artistes) ──────────────────────────────────────────────────────
   static Future<String> _deezerArtist(String artist) async {
     try {
       final uri = Uri.https('api.deezer.com', '/search/artist', {
@@ -154,7 +298,7 @@ class ImageService {
     }
   }
 
-  // ── MusicBrainz + Cover Art Archive (albums) ──────────────────────────
+  // ── MusicBrainz + Cover Art Archive (albums) ───────────────────────────────
   static Future<String> _mbAlbum(String album, String artist) async {
     try {
       // Étape 1 : chercher le MBID de la release
@@ -164,7 +308,7 @@ class ImageService {
         'fmt':   'json',
       });
       final searchRes = await http.get(searchUri, headers: {
-        'User-Agent': 'LastStatsMobile/1.2 (contact@laststats.app)',
+        'User-Agent': 'LastStatsMobile/2.0 (contact@laststats.app)',
       }).timeout(_timeout);
 
       if (searchRes.statusCode != 200) return '';
@@ -176,23 +320,32 @@ class ImageService {
       if (mbid.isEmpty) return '';
 
       // Étape 2 : Cover Art Archive
-      final coverUri = Uri.https('coverartarchive.org', '/release/$mbid/front');
-      // L'API redirige vers l'image ; on suit la redirection
+      final coverUri = Uri.https(
+          'coverartarchive.org', '/release/$mbid/front');
       final coverRes = await http.get(coverUri).timeout(_timeout);
 
       if (coverRes.statusCode == 200 || coverRes.statusCode == 307) {
-        // Certains clients suivent la redirection automatiquement
         if (coverRes.headers['content-type']?.startsWith('image') == true) {
           return coverUri.toString();
         }
-        // Sinon l'URL finale après redirect est dans headers['location']
         final location = coverRes.headers['location'];
         if (location != null && location.isNotEmpty) return location;
       }
-      // Fallback : URL directe (fonctionne souvent)
       return 'https://coverartarchive.org/release/$mbid/front-500';
     } catch (_) {
       return '';
     }
   }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  //  Debug log (no-op en release)
+  // ──────────────────────────────────────────────────────────────────────────
+  static void debugLog(String msg) {
+    assert(() { print(msg); return true; }());
+  }
+}
+
+// ── Helper pour les appels fire-and-forget (sans await) ──────────────────────
+void unawaited(Future<void> future) {
+  future.ignore();
 }

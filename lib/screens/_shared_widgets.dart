@@ -1,7 +1,11 @@
 // ignore_for_file: unused_import
 part of 'home_screen.dart';
 
-class _SmartImage extends StatelessWidget {
+/// Widget d'image intelligent avec résolution asynchrone.
+/// Converti en StatefulWidget pour mémoriser le Future de résolution :
+/// le resolver n'est appelé qu'une seule fois (ou si l'URL source change),
+/// ce qui évite les clignotements lors des rebuilds du parent (ex: refresh).
+class _SmartImage extends StatefulWidget {
   final String? initialUrl;
   final Future<String> Function() resolver;
   final double size, borderRadius;
@@ -9,32 +13,96 @@ class _SmartImage extends StatelessWidget {
       required this.borderRadius, this.initialUrl});
 
   static const _ph = '2a96cbd8b46e442fc41c2b86b821562f';
+
+  @override
+  State<_SmartImage> createState() => _SmartImageState();
+}
+
+class _SmartImageState extends State<_SmartImage> {
+  Future<String>? _future;
+  String?         _resolvedUrl;   // URL déjà résolue → pas de FutureBuilder
+  String?         _lastInitialUrl;
+
   bool get _needsResolve =>
-      initialUrl == null || initialUrl!.isEmpty || initialUrl!.contains(_ph);
+      widget.initialUrl == null ||
+      widget.initialUrl!.isEmpty ||
+      widget.initialUrl!.contains(_SmartImage._ph);
+
+  @override
+  void initState() {
+    super.initState();
+    _lastInitialUrl = widget.initialUrl;
+    if (!_needsResolve) {
+      _resolvedUrl = widget.initialUrl;
+    } else {
+      _future = widget.resolver();
+    }
+  }
+
+  @override
+  void didUpdateWidget(_SmartImage old) {
+    super.didUpdateWidget(old);
+    // Relancer uniquement si l'URL source a changé (piste différente)
+    if (widget.initialUrl != _lastInitialUrl) {
+      _lastInitialUrl = widget.initialUrl;
+      _resolvedUrl    = null;
+      if (!_needsResolve) {
+        _resolvedUrl = widget.initialUrl;
+        _future      = null;
+      } else {
+        _future = widget.resolver();
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    if (!_needsResolve) return _img(initialUrl!, scheme);
-    return FutureBuilder<String>(future: resolver(), builder: (_, snap) {
-      if (snap.connectionState != ConnectionState.done) return _loading(scheme);
-      final url = snap.data ?? '';
-      return url.isEmpty ? _fallback(scheme) : _img(url, scheme);
-    });
+
+    // URL directement disponible — pas de FutureBuilder
+    if (_resolvedUrl != null && _resolvedUrl!.isNotEmpty) {
+      return _img(_resolvedUrl!, scheme);
+    }
+    if (!_needsResolve) {
+      return _img(widget.initialUrl!, scheme);
+    }
+
+    return FutureBuilder<String>(
+      future: _future,
+      builder: (_, snap) {
+        if (snap.connectionState != ConnectionState.done) return _loading(scheme);
+        final url = snap.data ?? '';
+        // Mémoriser le résultat pour éviter les rebuilds futurs
+        if (url.isNotEmpty && _resolvedUrl == null) {
+          // Pas de setState ici pour ne pas causer un rebuild supplémentaire
+          _resolvedUrl = url;
+        }
+        return url.isEmpty ? _fallback(scheme) : _img(url, scheme);
+      },
+    );
   }
 
-  Widget _img(String url, ColorScheme s) => ClipRRect(borderRadius: BorderRadius.circular(borderRadius),
-    child: Image.network(url, width: size, height: size, fit: BoxFit.cover,
-        errorBuilder: (_, _, _) => _fallback(s)));
+  Widget _img(String url, ColorScheme s) => ClipRRect(
+    borderRadius: BorderRadius.circular(widget.borderRadius),
+    child: Image.network(url, width: widget.size, height: widget.size, fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _fallback(s)));
 
-  Widget _loading(ColorScheme s) => ClipRRect(borderRadius: BorderRadius.circular(borderRadius),
-    child: Container(width: size, height: size, color: s.surfaceContainerHighest,
-      child: Center(child: SizedBox(width: size * 0.4, height: size * 0.4,
-          child: CircularProgressIndicator(strokeWidth: 1.5, color: s.primary.withValues(alpha: 0.5))))));
+  Widget _loading(ColorScheme s) => ClipRRect(
+    borderRadius: BorderRadius.circular(widget.borderRadius),
+    child: Container(width: widget.size, height: widget.size,
+      color: s.surfaceContainerHighest,
+      child: Center(child: SizedBox(
+        width:  widget.size * 0.4,
+        height: widget.size * 0.4,
+        child: CircularProgressIndicator(
+            strokeWidth: 1.5, color: s.primary.withValues(alpha: 0.5))))));
 
-  Widget _fallback(ColorScheme s) => ClipRRect(borderRadius: BorderRadius.circular(borderRadius),
-    child: Container(width: size, height: size, color: s.surfaceContainerHighest,
-      child: Icon(Icons.music_note_rounded, color: s.onSurfaceVariant, size: size * 0.5)));
+  Widget _fallback(ColorScheme s) => ClipRRect(
+    borderRadius: BorderRadius.circular(widget.borderRadius),
+    child: Container(width: widget.size, height: widget.size,
+      color: s.surfaceContainerHighest,
+      child: Icon(Icons.music_note_rounded,
+          color: s.onSurfaceVariant, size: widget.size * 0.5)));
 }
 
 class _SectionHeader extends StatelessWidget {
