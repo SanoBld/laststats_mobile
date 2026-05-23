@@ -531,14 +531,3 @@ class _HistStatSection extends StatelessWidget {
     ]);
   }
 }
-
-
-// Settings — startup tab labels (must stay in sync with HomeScreen pages order)
-
-List<(IconData, String)> _localizedStartupLabels() => [
-  (Icons.dashboard_rounded,    L.navDashboard),
-  (Icons.search_rounded,       L.navSearch),
-  (Icons.emoji_events_rounded, L.navRankings),
-  (Icons.auto_graph_rounded,   L.navCharts),
-  (Icons.history_rounded,      L.navHistory),
-];

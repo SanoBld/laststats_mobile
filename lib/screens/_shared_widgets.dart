@@ -55,16 +55,14 @@ class _ItemTile extends StatelessWidget {
   final String name, sub, imageUrl, rank;
   final Future<String>? imageFuture;
   final String? plays;
-  final VoidCallback? onTap;
   const _ItemTile({required this.name, required this.sub, required this.imageUrl,
-      required this.rank, this.imageFuture, this.plays, this.onTap});
+      required this.rank, this.imageFuture, this.plays});
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final text   = Theme.of(context).textTheme;
     return InkWell(
-      onTap: onTap,
       borderRadius: BorderRadius.circular(10),
       child: Padding(padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
         child: Row(children: [
@@ -83,7 +81,6 @@ class _ItemTile extends StatelessWidget {
           if (plays != null) Padding(padding: const EdgeInsets.only(left: 8),
             child: Text(plays!, style: text.bodySmall
                 ?.copyWith(color: scheme.primary, fontWeight: FontWeight.w600))),
-          if (onTap != null) const Icon(Icons.chevron_right_rounded, size: 16),
         ])));
   }
 }

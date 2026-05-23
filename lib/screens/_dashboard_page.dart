@@ -27,6 +27,25 @@ class _FriendData {
 }
 
 
+// ── Configurable stat cards ──────────────────────────────────────────────────
+// Each entry: (id, emoji, labelFr, labelEn)
+const _kAllStatCards = [
+  ('top_artist',      '🎤', 'Artiste #1',           'Artist #1'),
+  ('top_album',       '💿', 'Album #1',              'Album #1'),
+  ('top_track',       '🎵', 'Titre #1',              'Track #1'),
+  ('last_track',      '⏱️', 'Dernière écoute',       'Last played'),
+  ('total',           '🎯', 'Total scrobbles',        'Total scrobbles'),
+  ('avg_day',         '⚡', 'Moy. / jour',            'Avg / day'),
+  ('avg_week',        '📅', 'Moy. / semaine',         'Avg / week'),
+  ('days_active',     '🗓️', 'Jours actifs',           'Days active'),
+  ('since',           '📆', 'Membre depuis',           'Member since'),
+  ('country',         '🌍', 'Pays',                   'Country'),
+  ('top_artist_week', '🎤', 'Artiste #1 (semaine)',   'Artist #1 (week)'),
+  ('top_album_week',  '💿', 'Album #1 (semaine)',     'Album #1 (week)'),
+  ('top_track_week',  '🎵', 'Titre #1 (semaine)',     'Track #1 (week)'),
+];
+const _kDefaultStatCards = ['top_artist', 'top_album', 'top_track', 'last_track'];
+
 // Dashboard
 
 class _DashboardPage extends StatefulWidget {
@@ -45,6 +64,10 @@ class _DashboardPageState extends State<_DashboardPage> {
   List<dynamic> _topTracks    = [];
   List<dynamic> _recentTracks = [];
   Map<String, dynamic>? _nowPlaying;
+  List<dynamic> _topArtistsWeek = [];
+  List<dynamic> _topAlbumsWeek  = [];
+  List<dynamic> _topTracksWeek  = [];
+  List<String>  _statCards      = List.from(_kDefaultStatCards);
 
   bool _loading = true;
   String? _error;
@@ -97,6 +120,9 @@ class _DashboardPageState extends State<_DashboardPage> {
       _showTracks            = p.getBool('ls_show_tracks')             ?? true;
       // Friends prefs
       _showFriends           = p.getBool('ls_show_friends')            ?? true;
+      final rawCards = p.getStringList('ls_stat_cards');
+      _statCards = rawCards != null && rawCards.isNotEmpty
+          ? rawCards : List.from(_kDefaultStatCards);
       _favFriends            = Set<String>.from(p.getStringList('ls_fav_friends') ?? []);
       _favProfiles           = Set<String>.from(p.getStringList('ls_fav_profiles') ?? []);
     });
@@ -112,6 +138,19 @@ class _DashboardPageState extends State<_DashboardPage> {
         widget.service.getTopTracks (period: 'overall', limit: 50),
         widget.service.getRecentTracks(limit: 10),
         widget.service.getNowPlaying(),
+        // Week top lists — fetched only if a week card is enabled
+        if (_statCards.contains('top_artist_week'))
+          widget.service.getTopArtists(period: '7day', limit: 1)
+        else
+          Future.value(<dynamic>[]),
+        if (_statCards.contains('top_album_week'))
+          widget.service.getTopAlbums(period: '7day', limit: 1)
+        else
+          Future.value(<dynamic>[]),
+        if (_statCards.contains('top_track_week'))
+          widget.service.getTopTracks(period: '7day', limit: 1)
+        else
+          Future.value(<dynamic>[]),
       ]);
       final recentRaw = (res[4] as Map<String, dynamic>)['track'];
       final allRecent = recentRaw is List ? recentRaw
@@ -128,8 +167,11 @@ class _DashboardPageState extends State<_DashboardPage> {
         _topAlbums    = res[2] as List<dynamic>;
         _topTracks    = res[3] as List<dynamic>;
         _recentTracks = recentF;
-        _nowPlaying   = np ?? res[5] as Map<String, dynamic>?;
-        _loading      = false;
+        _nowPlaying      = np ?? res[5] as Map<String, dynamic>?;
+        _topArtistsWeek  = res.length > 6 ? res[6] as List<dynamic> : [];
+        _topAlbumsWeek   = res.length > 7 ? res[7] as List<dynamic> : [];
+        _topTracksWeek   = res.length > 8 ? res[8] as List<dynamic> : [];
+        _loading         = false;
       });
       if (_nowPlaying != null) _extractColor(_nowPlaying!);
       _resolveHeaderImage();
@@ -179,7 +221,7 @@ class _DashboardPageState extends State<_DashboardPage> {
         final u     = raw[i];
         final uname = usernames[i];
 
-        final recentData = recentResults[i] as Map<String, dynamic>;
+        final recentData = recentResults[i];
         final trackRaw   = recentData['track'];
         final tList      = trackRaw is List
             ? trackRaw
@@ -398,6 +440,118 @@ class _DashboardPageState extends State<_DashboardPage> {
     if (ts <= 0) return '';
     final d = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
     return '${d.day} ${_kMonths[d.month]} ${d.year}';
+  }
+
+  Widget? _buildStatCard(
+    String id, {
+    Map? topArtist, Map? topAlbum, Map? topTrack, Map? lastTrack,
+    Map? topArtistWeek, Map? topAlbumWeek, Map? topTrackWeek,
+    int total = 0, double avg = 0, int weekly = 0,
+    int days = 0, String regStr = '', String country = '',
+  }) {
+    switch (id) {
+      case 'top_artist':
+        return _DashStatCard(
+          emoji: '🎤',
+          value: topArtist != null ? (topArtist['name'] ?? '—').toString() : '—',
+          label: L.dashArtist1,
+          sub:   topArtist != null
+              ? '${_fmt(int.tryParse((topArtist['playcount'] ?? '0').toString()) ?? 0)} ${L.commonPlays}'
+              : null,
+        );
+      case 'top_album':
+        return _DashStatCard(
+          emoji: '💿',
+          value: topAlbum != null ? (topAlbum['name'] ?? '—').toString() : '—',
+          label: L.dashAlbum1,
+          sub:   topAlbum != null ? (topAlbum['artist']?['name'] ?? '').toString() : null,
+        );
+      case 'top_track':
+        return _DashStatCard(
+          emoji: '🎵',
+          value: topTrack != null ? (topTrack['name'] ?? '—').toString() : '—',
+          label: L.dashTrack1,
+          sub:   topTrack != null
+              ? '${_fmt(int.tryParse((topTrack['playcount'] ?? '0').toString()) ?? 0)} ${L.commonPlays}'
+              : null,
+        );
+      case 'last_track':
+        return _DashStatCard(
+          emoji: '⏱️',
+          value: lastTrack != null ? (lastTrack['name'] ?? '—').toString() : '—',
+          label: L.dashLastTrack,
+          sub:   lastTrack != null ? _fmtTrackDateLocal(lastTrack) : null,
+        );
+      case 'total':
+        return _DashStatCard(
+          emoji: '🎯',
+          value: _fmtFull(total),
+          label: localeNotifier.value == 'en' ? 'Total scrobbles' : 'Total scrobbles',
+          sub: null,
+        );
+      case 'avg_day':
+        return _DashStatCard(
+          emoji: '⚡',
+          value: '~${_fmt(avg.round())}',
+          label: L.dashScrobblesPerDay,
+          sub: null,
+        );
+      case 'avg_week':
+        return _DashStatCard(
+          emoji: '📅',
+          value: '~${_fmt(weekly)}',
+          label: L.dashPerWeek,
+          sub: null,
+        );
+      case 'days_active':
+        return _DashStatCard(
+          emoji: '🗓️',
+          value: '$days j',
+          label: L.dashDaysActive,
+          sub: null,
+        );
+      case 'since':
+        return _DashStatCard(
+          emoji: '📆',
+          value: regStr.isNotEmpty ? regStr : '—',
+          label: localeNotifier.value == 'en' ? 'Member since' : 'Membre depuis',
+          sub: null,
+        );
+      case 'country':
+        return _DashStatCard(
+          emoji: '🌍',
+          value: (country.isNotEmpty && country != 'None') ? country : '—',
+          label: localeNotifier.value == 'en' ? 'Country' : 'Pays',
+          sub: null,
+        );
+      case 'top_artist_week':
+        return _DashStatCard(
+          emoji: '🎤',
+          value: topArtistWeek != null ? (topArtistWeek['name'] ?? '—').toString() : '—',
+          label: localeNotifier.value == 'en' ? 'Artist #1 (week)' : 'Artiste #1 (semaine)',
+          sub:   topArtistWeek != null
+              ? '${_fmt(int.tryParse((topArtistWeek['playcount'] ?? '0').toString()) ?? 0)} ${L.commonPlays}'
+              : null,
+        );
+      case 'top_album_week':
+        return _DashStatCard(
+          emoji: '💿',
+          value: topAlbumWeek != null ? (topAlbumWeek['name'] ?? '—').toString() : '—',
+          label: localeNotifier.value == 'en' ? 'Album #1 (week)' : 'Album #1 (semaine)',
+          sub:   topAlbumWeek != null ? (topAlbumWeek['artist']?['name'] ?? '').toString() : null,
+        );
+      case 'top_track_week':
+        return _DashStatCard(
+          emoji: '🎵',
+          value: topTrackWeek != null ? (topTrackWeek['name'] ?? '—').toString() : '—',
+          label: localeNotifier.value == 'en' ? 'Track #1 (week)' : 'Titre #1 (semaine)',
+          sub:   topTrackWeek != null
+              ? '${_fmt(int.tryParse((topTrackWeek['playcount'] ?? '0').toString()) ?? 0)} ${L.commonPlays}'
+              : null,
+        );
+      default:
+        return null;
+    }
   }
 
   @override
@@ -642,39 +796,19 @@ class _DashboardPageState extends State<_DashboardPage> {
 
                 const SizedBox(height: 10),
 
-                // 2×3 secondary stats grid
-                _StatGrid(children: [
-                  _DashStatCard(
-                    emoji: '🎤',
-                    value: topArtist != null ? (topArtist['name'] ?? '—').toString() : '—',
-                    label: L.dashArtist1,
-                    sub:   topArtist != null
-                        ? '${_fmt(int.tryParse((topArtist['playcount'] ?? '0').toString()) ?? 0)} écoutes'
-                        : null,
-                  ),
-                  _DashStatCard(
-                    emoji: '💿',
-                    value: topAlbum != null ? (topAlbum['name'] ?? '—').toString() : '—',
-                    label: L.dashAlbum1,
-                    sub:   topAlbum != null
-                        ? (topAlbum['artist']?['name'] ?? '').toString()
-                        : null,
-                  ),
-                  _DashStatCard(
-                    emoji: '🎵',
-                    value: topTrack != null ? (topTrack['name'] ?? '—').toString() : '—',
-                    label: L.dashTrack1,
-                    sub:   topTrack != null
-                        ? '${_fmt(int.tryParse((topTrack['playcount'] ?? '0').toString()) ?? 0)} écoutes'
-                        : null,
-                  ),
-                  _DashStatCard(
-                    emoji: '⏱️',
-                    value: lastTrack != null ? (lastTrack['name'] ?? '—').toString() : '—',
-                    label: L.dashLastTrack,
-                    sub:   lastTrack != null ? _fmtTrackDateLocal(lastTrack) : null,
-                  ),
-                ]),
+                // Dynamic stat cards grid
+                _StatGrid(children: _statCards.map((id) {
+                  return _buildStatCard(
+                    id,
+                    total: total, avg: avg, weekly: weekly,
+                    days: days, regStr: regStr, country: country,
+                    topArtist: topArtist, topAlbum: topAlbum,
+                    topTrack: topTrack, lastTrack: lastTrack,
+                    topArtistWeek: _topArtistsWeek.isNotEmpty ? _topArtistsWeek[0] as Map : null,
+                    topAlbumWeek:  _topAlbumsWeek.isNotEmpty  ? _topAlbumsWeek[0]  as Map : null,
+                    topTrackWeek:  _topTracksWeek.isNotEmpty  ? _topTracksWeek[0]  as Map : null,
+                  );
+                }).whereType<Widget>().toList()),
 
                 const SizedBox(height: 20),
               ],
@@ -693,40 +827,27 @@ class _DashboardPageState extends State<_DashboardPage> {
                 const SizedBox(height: 20),
               ],
 
-              // Top artists (mini)
+              // Top artists — carousel style
               if (_showArtists && _topArtists.isNotEmpty) ...[
                 _SectionHeader(title: L.commonTopArtists, icon: Icons.mic_rounded),
-                const SizedBox(height: 8),
-                ..._topArtists.take(5).toList().asMap().entries.map((e) => _ItemTile(
-                  name:     (e.value['name'] ?? '').toString(),
-                  sub:      '${_fmt(int.tryParse((e.value['playcount'] ?? '0').toString()) ?? 0)} ${L.commonPlays}',
-                  imageUrl: _extractImage(e.value['image']),
-                  imageFuture: ImageService.resolveArtist((e.value['name'] ?? '').toString(),
-                      lastfmUrl: _extractImage(e.value['image'])),
-                  rank: '${e.key + 1}',
-                  onTap: () => showDetailSheet(context, Map<String, dynamic>.from(e.value as Map), 'artists', widget.service),
-                )),
+                const SizedBox(height: 10),
+                _HorizontalCarousel(
+                  items: _topArtists.take(10).toList(),
+                  type: 'artists',
+                  service: widget.service,
+                ),
                 const SizedBox(height: 20),
               ],
 
-              // Top tracks (mini)
+              // Top tracks — carousel style
               if (_showTracks && _topTracks.isNotEmpty) ...[
                 _SectionHeader(title: L.dashTopTracks, icon: Icons.music_note_rounded),
-                const SizedBox(height: 8),
-                ..._topTracks.take(5).toList().asMap().entries.map((e) {
-                  final tName  = (e.value['name'] ?? '').toString();
-                  final artist = (e.value['artist']?['name'] ?? '').toString();
-                  return _ItemTile(
-                    name:     tName,
-                    sub:      artist,
-                    imageUrl: _extractImage(e.value['image']),
-                    imageFuture: ImageService.resolveTrack(tName, artist,
-                        lastfmUrl: _extractImage(e.value['image'])),
-                    rank:  '${e.key + 1}',
-                    plays: _fmt(int.tryParse((e.value['playcount'] ?? '0').toString()) ?? 0),
-                    onTap: () => showDetailSheet(context, Map<String, dynamic>.from(e.value as Map), 'tracks', widget.service),
-                  );
-                }),
+                const SizedBox(height: 10),
+                _HorizontalCarousel(
+                  items: _topTracks.take(10).toList(),
+                  type: 'tracks',
+                  service: widget.service,
+                ),
                 const SizedBox(height: 20),
               ],
             ]),
@@ -738,7 +859,267 @@ class _DashboardPageState extends State<_DashboardPage> {
 }
 
 
-// ── Friends section widget ───────────────────────────────────────────────────
+// ── Horizontal carousel (style Spotify/Apple Music) ─────────────────────────
+
+class _HorizontalCarousel extends StatelessWidget {
+  final List<dynamic>  items;
+  final String         type;    // 'artists' | 'tracks'
+  final LastFmService  service;
+
+  const _HorizontalCarousel({
+    required this.items,
+    required this.type,
+    required this.service,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Hauteur de la carte : ~55 % de la largeur de l'écran, max 220
+    final cardW = (MediaQuery.of(context).size.width * 0.52).clamp(160.0, 220.0);
+    final cardH = cardW * 1.10; // ratio légèrement portrait
+
+    return SizedBox(
+      height: cardH,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.only(right: 8),
+        itemCount: items.length,
+        itemBuilder: (ctx, i) {
+          final item   = items[i] as Map<String, dynamic>;
+          final name   = (item['name'] ?? '').toString();
+          final artist = type != 'artists'
+              ? (item['artist']?['name'] ?? '').toString()
+              : '';
+          final plays  = int.tryParse((item['playcount'] ?? '0').toString()) ?? 0;
+          final raw    = _extractImage(item['image']);
+
+          final Future<String> imgFuture;
+          switch (type) {
+            case 'artists':
+              imgFuture = ImageService.resolveArtist(name, lastfmUrl: raw.isNotEmpty ? raw : null);
+            case 'tracks':
+              imgFuture = ImageService.resolveTrack(name, artist, lastfmUrl: raw.isNotEmpty ? raw : null);
+            default:
+              imgFuture = ImageService.resolveAlbum(name, artist, lastfmUrl: raw.isNotEmpty ? raw : null);
+          }
+
+          return Padding(
+            padding: EdgeInsets.only(left: i == 0 ? 0 : 10),
+            child: _CarouselCard(
+              width:  cardW,
+              height: cardH,
+              name:   name,
+              sub:    type != 'artists' ? artist : '',
+              plays:  _fmt(plays),
+              rank:   '${i + 1}',
+              initialUrl: raw,
+              imageFuture: imgFuture,
+              onTap: () => showDetailSheet(
+                ctx,
+                Map<String, dynamic>.from(item),
+                type,
+                service,
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ── Carte individuelle du carousel ────────────────────────────────────────────
+
+class _CarouselCard extends StatelessWidget {
+  final double  width, height;
+  final String  name, sub, plays, rank;
+  final String? initialUrl;
+  final Future<String> imageFuture;
+  final VoidCallback   onTap;
+
+  const _CarouselCard({
+    required this.width,
+    required this.height,
+    required this.name,
+    required this.sub,
+    required this.plays,
+    required this.rank,
+    required this.imageFuture,
+    required this.onTap,
+    this.initialUrl,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final text   = Theme.of(context).textTheme;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: SizedBox(
+          width: width, height: height,
+          child: Stack(fit: StackFit.expand, children: [
+
+            // ── Image de fond (full bleed) ────────────────────────────
+            _CarouselImage(
+              initialUrl: initialUrl,
+              resolver:   () => imageFuture,
+              width:  width,
+              height: height,
+            ),
+
+            // ── Dégradé bas → opaque ─────────────────────────────────
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end:   Alignment.bottomCenter,
+                  stops: const [0.35, 0.72, 1.0],
+                  colors: [
+                    Colors.transparent,
+                    Colors.black.withValues(alpha: 0.55),
+                    Colors.black.withValues(alpha: 0.85),
+                  ],
+                ),
+              ),
+            ),
+
+            // ── Contenu texte bas ─────────────────────────────────────
+            Positioned(
+              left: 10, right: 10, bottom: 10,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: text.bodyMedium?.copyWith(
+                      color:      Colors.white,
+                      fontWeight: FontWeight.w800,
+                      height:     1.2,
+                      shadows: [
+                        Shadow(color: Colors.black.withValues(alpha: 0.6),
+                            blurRadius: 8),
+                      ],
+                    ),
+                  ),
+                  if (sub.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      sub,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: text.bodySmall?.copyWith(
+                        color:  Colors.white.withValues(alpha: 0.75),
+                        height: 1.2,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 6),
+                  // Plays pill + rank badge
+                  Row(children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color:        Colors.white.withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(20),
+                        border:       Border.all(
+                            color: Colors.white.withValues(alpha: 0.25), width: 0.8),
+                      ),
+                      child: Text(
+                        '$plays ${L.commonPlays}',
+                        style: text.labelSmall?.copyWith(
+                            color: Colors.white, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    const Spacer(),
+                    // Numéro de rang
+                    Container(
+                      width: 26, height: 26,
+                      decoration: BoxDecoration(
+                        color:        Colors.white.withValues(alpha: 0.15),
+                        shape:        BoxShape.circle,
+                        border:       Border.all(
+                            color: Colors.white.withValues(alpha: 0.35), width: 1),
+                      ),
+                      child: Center(
+                        child: Text(
+                          rank,
+                          style: text.labelSmall?.copyWith(
+                              color: Colors.white, fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ),
+                  ]),
+                ],
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Image plein-cadre pour le carousel ───────────────────────────────────────
+
+class _CarouselImage extends StatelessWidget {
+  final String? initialUrl;
+  final Future<String> Function() resolver;
+  final double width, height;
+
+  static const _ph = '2a96cbd8b46e442fc41c2b86b821562f';
+
+  bool get _needsResolve =>
+      initialUrl == null || initialUrl!.isEmpty || initialUrl!.contains(_ph);
+
+  const _CarouselImage({
+    required this.resolver,
+    required this.width,
+    required this.height,
+    this.initialUrl,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    if (!_needsResolve) return _img(initialUrl!, scheme);
+    return FutureBuilder<String>(
+      future: resolver(),
+      builder: (_, snap) {
+        if (snap.connectionState != ConnectionState.done) return _skeleton(scheme);
+        final url = snap.data ?? '';
+        return url.isEmpty ? _fallback(scheme) : _img(url, scheme);
+      },
+    );
+  }
+
+  Widget _img(String url, ColorScheme s) => Image.network(
+    url, width: width, height: height, fit: BoxFit.cover,
+    errorBuilder: (_, _, _) => _fallback(s),
+  );
+
+  Widget _skeleton(ColorScheme s) => Container(
+    width: width, height: height,
+    color: s.surfaceContainerHighest,
+    child: Center(child: SizedBox(
+      width: 28, height: 28,
+      child: CircularProgressIndicator(
+          strokeWidth: 2, color: s.primary.withValues(alpha: 0.4)),
+    )),
+  );
+
+  Widget _fallback(ColorScheme s) => Container(
+    width: width, height: height,
+    color: s.surfaceContainerHighest,
+    child: Icon(Icons.music_note_rounded,
+        color: s.onSurfaceVariant, size: width * 0.35),
+  );
+}
+
 
 class _FriendsSection extends StatelessWidget {
   final List<_FriendData>   friends;
@@ -763,7 +1144,6 @@ class _FriendsSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme      = Theme.of(context).colorScheme;
     final text        = Theme.of(context).textTheme;
-    final onlineCount = friends.where((f) => f.isOnline).length;
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 

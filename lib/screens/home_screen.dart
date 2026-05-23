@@ -5,22 +5,17 @@
 // ══════════════════════════════════════════════════════════════════════════
 
 import 'dart:async';
-import 'dart:convert';
 import 'dart:ui';
-import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:palette_generator/palette_generator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../app_state.dart';
 import '../l10n.dart';
 import '../services/lastfm_service.dart';
 import '../services/image_service.dart';
 import '../services/update_service.dart';
-import 'setup_screen.dart';
 
 // ── Sous-pages de paramètres ──────────────────────────────────────────────────
-import 'settings/settings_helpers.dart';
 import 'settings/appearance_page.dart';
 import 'settings/dashboard_settings_page.dart';
 import 'settings/startup_page.dart';
@@ -41,11 +36,6 @@ part '_settings_page.dart';
 part '_shared_widgets.dart';
 
 
-// ── Period API keys (labels come from L) ──────────────────────────────────
-const _kPeriodKeys = [
-  '7day', '1month', '3month', '6month', '12month', 'overall',
-];
-
 /// Returns the localized (key, label) pairs for period filter chips.
 List<(String, String)> _localizedPeriods() => [
   ('7day',    L.period7day),
@@ -54,41 +44,6 @@ List<(String, String)> _localizedPeriods() => [
   ('6month',  L.period6month),
   ('12month', L.period12month),
   ('overall', L.periodOverall),
-];
-
-List<(String, String, IconData)> _localizedHeaderSources() => [
-  ('nowplaying',  L.headerNowPlaying,  Icons.play_circle_rounded),
-  ('top_track',   L.headerTopTrack,    Icons.music_note_rounded),
-  ('top_album',   L.headerTopAlbum,    Icons.album_rounded),
-  ('top_artist',  L.headerTopArtist,   Icons.mic_rounded),
-  ('custom',      L.headerCustomImage, Icons.image_rounded),
-  ('none',        L.headerThemeColor,  Icons.palette_rounded),
-];
-
-// ── Header animations ─────────────────────────────────────────────────────
-List<(String, String, IconData)> _localizedHeaderAnimations() => [
-  ('none',  L.headerAnimNone,  Icons.block_rounded),
-  ('fade',  L.headerAnimFade,  Icons.opacity_rounded),
-  ('slide', L.headerAnimSlide, Icons.swap_horiz_rounded),
-  ('zoom',  L.headerAnimZoom,  Icons.zoom_in_rounded),
-];
-
-// ── Header periods ────────────────────────────────────────────────────────
-List<(String, String)> _localizedHeaderPeriods() => [
-  ('7day',    L.headerPeriodWeek),
-  ('1month',  L.headerPeriodMonth),
-  ('overall', L.headerPeriodAllTime),
-];
-
-// ── Accent presets ────────────────────────────────────────────────────────
-const _kAccentOptions = [
-  (Color(0xFF7C3AED), 'purple', 'Violet / Purple'),
-  (Color(0xFF1D4ED8), 'blue',   'Bleu / Blue'),
-  (Color(0xFF059669), 'green',  'Vert / Green'),
-  (Color(0xFFDC2626), 'red',    'Rouge / Red'),
-  (Color(0xFFD97706), 'orange', 'Orange'),
-  (Color(0xFFDB2777), 'pink',   'Rose / Pink'),
-  (Color(0xFF0F766E), 'teal',   'Sarcelle / Teal'),
 ];
 
 // ── Month abbreviations (from L, for shared_widgets) ─────────────────────

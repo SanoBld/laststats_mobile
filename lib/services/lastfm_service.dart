@@ -209,6 +209,22 @@ class LastFmService {
     }
   }
 
+  // ── Artist top tags (global) ────────────────────────────
+  Future<List<dynamic>> getArtistTopTags(String artist) async {
+    try {
+      final d = await _call({
+        'method':      'artist.getTopTags',
+        'artist':      artist,
+        'autocorrect': '1',
+      });
+      final tags = d['toptags']?['tag'];
+      if (tags == null) return [];
+      return tags is List ? tags : [tags];
+    } catch (_) {
+      return [];
+    }
+  }
+
   // ── Album info (global + user context) ──────────────────
   Future<Map<String, dynamic>?> getAlbumInfo(String album, String artist) async {
     try {
