@@ -72,6 +72,7 @@ class _DashboardPageState extends State<_DashboardPage> {
   bool _loading = true;
   String? _error;
   Timer? _npTimer;
+  Timer? _topTimer;   // rafraîchissement top artistes / top titres (3 min)
 
   String _headerSource          = 'nowplaying';
   String _headerImageUrl        = '';
@@ -80,6 +81,8 @@ class _DashboardPageState extends State<_DashboardPage> {
   String _headerCustomUrl       = '';
   String _headerFallbackUrl     = '';
   bool   _headerFallbackEnabled = false;
+  String _fallbackType          = 'none';    // 'none'|'top_track'|'top_album'|'top_artist'|'custom_url'
+  String _fallbackPeriod        = 'overall'; // '7day'|'1month'|'overall'
   String _headerPeriod          = 'overall';
   bool   _showNowPlay           = true;
   bool   _showStats             = true;
@@ -99,11 +102,18 @@ class _DashboardPageState extends State<_DashboardPage> {
     super.initState();
     // Charge prefs + cache en parallèle → affichage immédiat
     _initWithCache();
-    _npTimer = Timer.periodic(const Duration(seconds: 10), (_) => _refreshLive());
+    // Refresh now playing toutes les 10 s (ne reconstruit que si la piste change)
+    _npTimer  = Timer.periodic(const Duration(seconds: 10), (_) => _refreshLive());
+    // Refresh top artistes & top titres toutes les 3 min (silencieux, sans skeleton)
+    _topTimer = Timer.periodic(const Duration(minutes: 3),  (_) => _refreshTopLists());
   }
 
   @override
-  void dispose() { _npTimer?.cancel(); super.dispose(); }
+  void dispose() {
+    _npTimer?.cancel();
+    _topTimer?.cancel();
+    super.dispose();
+  }
 
   // ── Initialisation avec cache en mémoire ─────────────────
   /// Charge les préférences et le cache simultanément.
@@ -182,8 +192,10 @@ class _DashboardPageState extends State<_DashboardPage> {
       _headerBlur            = p.getDouble('ls_header_blur')            ?? 0.0;
       _headerAnimation       = p.getString('ls_header_animation')      ?? 'fade';
       _headerCustomUrl       = p.getString('ls_header_custom_url')     ?? '';
-      _headerFallbackUrl     = p.getString('ls_header_fallback_url')   ?? '';
-      _headerFallbackEnabled = p.getBool('ls_header_fallback_enabled') ?? false;
+      _headerFallbackUrl     = p.getString('ls_header_fallback_url')     ?? '';
+      _headerFallbackEnabled = p.getBool('ls_header_fallback_enabled')   ?? false;
+      _fallbackType          = p.getString('ls_header_fallback_type')   ?? 'none';
+      _fallbackPeriod        = p.getString('ls_header_fallback_period') ?? 'overall';
       _headerPeriod          = p.getString('ls_header_period')         ?? 'overall';
       _showNowPlay           = p.getBool('ls_show_nowplay')            ?? true;
       _showStats             = p.getBool('ls_show_stats')              ?? true;
@@ -280,21 +292,69 @@ class _DashboardPageState extends State<_DashboardPage> {
     }
   }
 
+  /// Refresh silencieux du "now playing" (toutes les 10 s).
+  /// Ne reconstruit la page que si la piste a réellement changé → évite les
+  /// clignotements des carousels top artistes / top titres.
   Future<void> _refreshLive() async {
-    // Refresh now playing
     try {
       final np = await widget.service.getNowPlaying();
-      if (mounted) {
+      if (!mounted) return;
+
+      final prevName   = _nowPlaying?['name']?.toString() ?? '';
+      final prevArtist = (_nowPlaying?['artist']?['#text'] ?? '').toString();
+      final newName    = np?['name']?.toString() ?? '';
+      final newArtist  = (np?['artist']?['#text'] ?? '').toString();
+      final changed    = prevName != newName || prevArtist != newArtist;
+
+      if (changed) {
+        // Piste différente → mise à jour UI + couleur + image header
         setState(() => _nowPlaying = np);
         if (np != null) {
           _extractColor(np);
           DataCache.set(DataCache.keyNowPlaying(), np);
         }
         _resolveHeaderImage();
+      } else if (np != null) {
+        // Même piste → cache silencieux, aucun rebuild
+        DataCache.set(DataCache.keyNowPlaying(), np);
       }
     } catch (_) {}
     // Refresh friends status silently (no skeleton)
     if (_showFriends && mounted) _loadFriends(silent: true);
+  }
+
+  /// Refresh silencieux des tops artistes & titres (toutes les 3 min).
+  /// Met à jour les listes en arrière-plan sans afficher de skeleton.
+  Future<void> _refreshTopLists() async {
+    if (!mounted) return;
+    try {
+      final results = await Future.wait([
+        widget.service.getTopArtists(period: 'overall', limit: 50),
+        widget.service.getTopTracks (period: 'overall', limit: 50),
+        if (_statCards.contains('top_artist_week'))
+          widget.service.getTopArtists(period: '7day', limit: 1)
+        else
+          Future.value(<dynamic>[]),
+        if (_statCards.contains('top_track_week'))
+          widget.service.getTopTracks(period: '7day', limit: 1)
+        else
+          Future.value(<dynamic>[]),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _topArtists     = results[0] as List<dynamic>;
+        _topTracks      = results[1] as List<dynamic>;
+        if (results.length > 2) _topArtistsWeek = results[2] as List<dynamic>;
+        if (results.length > 3) _topTracksWeek  = results[3] as List<dynamic>;
+      });
+      // Mise à jour du cache
+      DataCache.set(DataCache.keyTopArtists('overall'), results[0]);
+      DataCache.set(DataCache.keyTopTracks('overall'),  results[1]);
+      if (results.length > 2 && (results[2] as List).isNotEmpty)
+        DataCache.set(DataCache.keyTopArtists('7day'), results[2]);
+      if (results.length > 3 && (results[3] as List).isNotEmpty)
+        DataCache.set(DataCache.keyTopTracks('7day'),  results[3]);
+    } catch (_) {}
   }
 
   // [silent] = true → refresh in background without showing skeleton
@@ -454,6 +514,7 @@ class _DashboardPageState extends State<_DashboardPage> {
       case 'custom':
         url = _headerCustomUrl;
       case 'nowplaying':
+        // Résoudre l'image de la piste en cours si disponible
         if (_nowPlaying != null) {
           final raw = _extractImage(_nowPlaying!['image']);
           url = await ImageService.resolveTrack(
@@ -462,8 +523,9 @@ class _DashboardPageState extends State<_DashboardPage> {
             lastfmUrl: raw,
           );
         }
-        if (url.isEmpty && _headerFallbackEnabled && _headerFallbackUrl.isNotEmpty) {
-          url = _headerFallbackUrl;
+        // Si pas de musique en cours (ou image introuvable), appliquer le fallback
+        if (url.isEmpty && _fallbackType != 'none') {
+          url = await _resolveFallbackImage();
         }
       case 'top_track':
         final tracks = _headerPeriod == 'overall'
@@ -504,6 +566,54 @@ class _DashboardPageState extends State<_DashboardPage> {
         url = '';
     }
     if (mounted) setState(() => _headerImageUrl = url);
+  }
+
+  /// Résout l'image de fallback selon le type choisi dans les paramètres Dashboard.
+  /// Appelé uniquement quand la source principale est "nowplaying" et qu'aucune
+  /// musique n'est en cours (ou que son image est introuvable).
+  Future<String> _resolveFallbackImage() async {
+    try {
+      switch (_fallbackType) {
+        case 'top_track':
+          final tracks = _fallbackPeriod == 'overall' && _topTracks.isNotEmpty
+              ? _topTracks
+              : await widget.service.getTopTracks(period: _fallbackPeriod, limit: 1);
+          if (tracks.isNotEmpty) {
+            final t = tracks[0] as Map;
+            return ImageService.resolveTrack(
+              (t['name'] ?? '').toString(),
+              (t['artist']?['name'] ?? '').toString(),
+              lastfmUrl: _extractImage(t['image']),
+            );
+          }
+        case 'top_album':
+          final albums = _fallbackPeriod == 'overall' && _topAlbums.isNotEmpty
+              ? _topAlbums
+              : await widget.service.getTopAlbums(period: _fallbackPeriod, limit: 1);
+          if (albums.isNotEmpty) {
+            final a = albums[0] as Map;
+            return ImageService.resolveAlbum(
+              (a['name'] ?? '').toString(),
+              (a['artist']?['name'] ?? '').toString(),
+              lastfmUrl: _extractImage(a['image']),
+            );
+          }
+        case 'top_artist':
+          final artists = _fallbackPeriod == 'overall' && _topArtists.isNotEmpty
+              ? _topArtists
+              : await widget.service.getTopArtists(period: _fallbackPeriod, limit: 1);
+          if (artists.isNotEmpty) {
+            final a = artists[0] as Map;
+            return ImageService.resolveArtist(
+              (a['name'] ?? '').toString(),
+              lastfmUrl: _extractImage(a['image']),
+            );
+          }
+        case 'custom_url':
+          if (_headerFallbackUrl.isNotEmpty) return _headerFallbackUrl;
+      }
+    } catch (_) {}
+    return '';
   }
 
   Future<void> _extractColor(Map<String, dynamic> track) async {
@@ -695,17 +805,26 @@ class _DashboardPageState extends State<_DashboardPage> {
             ),
             IconButton(
               icon: const Icon(Icons.settings_outlined),
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => Scaffold(
-                    appBar: AppBar(
-                      title: Text(L.navSettings),
-                      scrolledUnderElevation: 0,
+              onPressed: () async {
+                // Ouvre le hub de paramètres
+                await Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => Scaffold(
+                      appBar: AppBar(
+                        title: Text(L.navSettings),
+                        scrolledUnderElevation: 0,
+                      ),
+                      body: _SettingsPage(username: widget.username),
                     ),
-                    body: _SettingsPage(username: widget.username),
                   ),
-                ),
-              ),
+                );
+                // Au retour, recharger les préférences du dashboard pour que
+                // tout changement (source image, blur, sections…) soit appliqué.
+                if (mounted) {
+                  await _loadPrefs();
+                  _resolveHeaderImage();
+                }
+              },
               tooltip: L.navSettings,
             ),
             const SizedBox(width: 4),
