@@ -1,3 +1,9 @@
+// lib/screens/home_screen.dart
+// ══════════════════════════════════════════════════════════════════════════
+//  Écran principal avec navigation bas de page.
+//  Les paramètres sont désormais dans des sous-pages dédiées.
+// ══════════════════════════════════════════════════════════════════════════
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ui';
@@ -12,6 +18,17 @@ import '../services/lastfm_service.dart';
 import '../services/image_service.dart';
 import '../services/update_service.dart';
 import 'setup_screen.dart';
+
+// ── Sous-pages de paramètres ──────────────────────────────────────────────────
+import 'settings/settings_helpers.dart';
+import 'settings/appearance_page.dart';
+import 'settings/dashboard_settings_page.dart';
+import 'settings/startup_page.dart';
+import 'settings/language_page.dart';
+import 'settings/account_page.dart';
+import 'settings/backup_page.dart';
+import 'settings/updates_page.dart';
+import 'settings/about_page.dart';
 
 // Parts
 part '_dashboard_page.dart';
@@ -38,7 +55,6 @@ List<(String, String)> _localizedPeriods() => [
   ('12month', L.period12month),
   ('overall', L.periodOverall),
 ];
-
 
 List<(String, String, IconData)> _localizedHeaderSources() => [
   ('nowplaying',  L.headerNowPlaying,  Icons.play_circle_rounded),
@@ -109,7 +125,6 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _idx     = widget.startupTab.clamp(0, 5);
     _service = LastFmService(apiKey: widget.apiKey, username: widget.username);
-    // Rebuild nav labels when language changes
     localeNotifier.addListener(_onLocaleChange);
   }
 
