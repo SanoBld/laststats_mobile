@@ -16,6 +16,7 @@ import '../services/image_service.dart';
 import '../services/update_service.dart';
 import '../services/data_cache.dart';
 import '../services/prefetch_service.dart';
+import '../services/all_scrobbles_service.dart'; // ← Nouveau
 
 // ── Sous-pages de paramètres ──────────────────────────────────────────────────
 import 'settings/appearance_page.dart';
@@ -83,9 +84,13 @@ class _HomeScreenState extends State<HomeScreen> {
     _idx     = widget.startupTab.clamp(0, 5);
     _service = LastFmService(apiKey: widget.apiKey, username: widget.username);
     localeNotifier.addListener(_onLocaleChange);
-    // Initialiser le cache puis lancer le préchargement en arrière-plan
+
+    // Initialiser le cache puis lancer les préchargements en arrière-plan
     DataCache.init().then((_) {
+      // 1. Données Dashboard / Rankings / Search (prefetch standard)
       PrefetchService.prefetchAll(_service);
+      // 2. Historique complet pour les graphiques (silencieux, paginé)
+      AllScrobblesService.loadAll(_service);
     });
   }
 

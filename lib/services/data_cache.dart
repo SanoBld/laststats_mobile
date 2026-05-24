@@ -18,17 +18,23 @@ class DataCache {
   static const _prefix = 'lscache_';
 
   // ── TTL par catégorie (en minutes) ────────────────────────────────────────
+  // IMPORTANT : allscrobbles_cur doit précéder allscrobbles dans la map
+  // pour que le matching startsWith soit correct.
   static const _ttl = <String, int>{
-    'userinfo':   60,   // info profil : 1 h
-    'topartists': 30,   // top artistes par période : 30 min
-    'topalbums':  30,
-    'toptracks':  30,
-    'recent':      2,   // pistes récentes : 2 min (quasi-live)
-    'nowplaying':  1,   // en cours : 1 min
-    'monthly':   360,   // scrobbles mensuels : 6 h
-    'loved':      60,   // pistes aimées : 1 h
-    'friends':     5,   // amis : 5 min
-    'search':     10,   // résultats de recherche : 10 min
+    'userinfo':          60,        // info profil : 1 h
+    'topartists':        30,        // top artistes par période : 30 min
+    'topalbums':         30,
+    'toptracks':         30,
+    'recent':             2,        // pistes récentes : 2 min (quasi-live)
+    'nowplaying':         1,        // en cours : 1 min
+    'monthly':          360,        // scrobbles mensuels : 6 h
+    'loved':             60,        // pistes aimées : 1 h
+    'friends':            5,        // amis : 5 min
+    'search':            10,        // résultats de recherche : 10 min
+    // ── Historique complet (AllScrobblesService) ──────────────────────────
+    'allscrobbles_cur':  60,        // année en cours : 1 h
+    'allscrobbles_meta': 60 * 24,   // méta (années chargées) : 24 h
+    'allscrobbles':      60 * 24 * 90, // années passées : 90 jours
   };
 
   // Cache en mémoire (évite les lectures disque répétées)

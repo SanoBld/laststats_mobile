@@ -23,60 +23,152 @@ class _ChartsPage extends StatefulWidget {
 class _ChartsPageState extends State<_ChartsPage>
     with AutomaticKeepAliveClientMixin {
 
-  Map<String, int>? _monthly;
+  // ── Données globales (tops all-time) ─────────────────────────────────────
   List<dynamic> _topArtists = [];
   List<dynamic> _topAlbums  = [];
-  bool _loading = true;
+  bool   _loading = true;
   String? _error;
 
-  bool _hourlyLoading = false;
-  Map<int, int>? _hourlyData;
-  Map<int, int>? _weekdayData;
-  int _hourlyCount = 0;
-
+  // ── Données liées à l'année sélectionnée ─────────────────────────────────
+  Map<String, int>? _monthly;
+  bool _hourlyLoading   = false;
+  Map<int, int>?    _hourlyData;
+  Map<int, int>?    _weekdayData;
+  int  _hourlyCount     = 0;
   bool _calendarLoading = false;
   Map<String, int>? _calendarData;
 
+  // ── Genres (dérivé des tops artistes, all-time) ───────────────────────────
   bool _tagsLoading = false;
   List<_TagEntry> _tags = [];
+
+  // ── Sélection d'année ─────────────────────────────────────────────────────
+  int        _selectedYear  = DateTime.now().year;
+  List<int>  _availableYears = [DateTime.now().year];
+
+  // ── Progression du chargement historique ─────────────────────────────────
+  AllScrobblesProgress _historyProgress = AllScrobblesProgress.idle();
 
   @override
   bool get wantKeepAlive => true;
 
+  // ══════════════════════════════════════════════════════════════════════════
+  //  Cycle de vie
+  // ══════════════════════════════════════════════════════════════════════════
+
   @override
   void initState() {
     super.initState();
+    AllScrobblesService.progressNotifier.addListener(_onHistoryProgress);
     _load();
   }
+
+  @override
+  void dispose() {
+    AllScrobblesService.progressNotifier.removeListener(_onHistoryProgress);
+    super.dispose();
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  Listeners
+  // ══════════════════════════════════════════════════════════════════════════
+
+  void _onHistoryProgress() {
+    if (!mounted) return;
+    final p = AllScrobblesService.progressNotifier.value;
+    setState(() => _historyProgress = p);
+
+    // Actualiser les années disponibles dès qu'une nouvelle est chargée
+    _refreshAvailableYears();
+
+    // Si l'année sélectionnée vient d'être chargée, mettre à jour les graphiques
+    if (AllScrobblesService.isYearCached(_selectedYear) && _hourlyData == null) {
+      _loadYearData(_selectedYear);
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  Chargement principal
+  // ══════════════════════════════════════════════════════════════════════════
 
   Future<void> _load() async {
     setState(() { _loading = true; _error = null; });
     try {
       final res = await Future.wait([
-        widget.service.getMonthlyScrobbles(months: 24),
         widget.service.getTopArtists(period: 'overall', limit: 10),
         widget.service.getTopAlbums(period: 'overall',  limit: 10),
       ]);
       if (!mounted) return;
       setState(() {
-        _monthly    = (res[0] as Map).cast<String, int>();
-        _topArtists = res[1] as List<dynamic>;
-        _topAlbums  = res[2] as List<dynamic>;
+        _topArtists = res[0] as List<dynamic>;
+        _topAlbums  = res[1] as List<dynamic>;
         _loading    = false;
       });
+
+      _refreshAvailableYears();
       _loadTags();
-      _loadHourly();
-      _loadCalendar();
+
+      // Charger les données de l'année sélectionnée
+      await _loadYearData(_selectedYear);
+
+      // Démarrer le chargement de l'historique complet si pas encore lancé
+      if (!AllScrobblesService.isRunning) {
+        AllScrobblesService.loadAll(widget.service);
+      }
+
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error   = e.toString().replaceFirst('Exception: ', '');
+        _error  = e.toString().replaceFirst('Exception: ', '');
         _loading = false;
       });
     }
   }
 
-  Future<void> _loadHourly() async {
+  // ── Chargement des données d'une année ────────────────────────────────────
+
+  Future<void> _loadYearData(int year) async {
+    // Priorité 1 : cache AllScrobbles (instantané)
+    final timestamps = AllScrobblesService.getTimestampsForYear(year);
+    if (timestamps != null) {
+      if (!mounted) return;
+      setState(() {
+        _monthly      = AllScrobblesService.computeMonthly(timestamps);
+        _hourlyData   = AllScrobblesService.computeHourly(timestamps);
+        _weekdayData  = AllScrobblesService.computeWeekday(timestamps);
+        _hourlyCount  = timestamps.length;
+        _calendarData = AllScrobblesService.computeCalendar(timestamps);
+        _hourlyLoading   = false;
+        _calendarLoading = false;
+      });
+      return;
+    }
+
+    // Priorité 2 : fallback API (seulement utile pour l'année en cours)
+    await Future.wait([
+      _loadMonthlyFallback(),
+      _loadHourlyFallback(),
+      _loadCalendarFallback(year),
+    ]);
+  }
+
+  // ── Fallbacks API ─────────────────────────────────────────────────────────
+
+  Future<void> _loadMonthlyFallback() async {
+    try {
+      final data = await widget.service.getMonthlyScrobbles(months: 24);
+      if (!mounted) return;
+      // Filtrer sur l'année sélectionnée si possible
+      final filtered = Map.fromEntries(
+        data.entries.where((e) => e.key.startsWith('$_selectedYear')),
+      );
+      setState(() => _monthly = filtered.isNotEmpty ? filtered : data);
+    } catch (_) {
+      if (mounted) setState(() => _monthly = {});
+    }
+  }
+
+  Future<void> _loadHourlyFallback() async {
     if (_hourlyLoading) return;
     setState(() {
       _hourlyLoading = true;
@@ -116,21 +208,33 @@ class _ChartsPageState extends State<_ChartsPage>
         _hourlyLoading = false;
       });
     } catch (_) {
-      if (!mounted) return;
-      setState(() => _hourlyLoading = false);
+      if (mounted) setState(() => _hourlyLoading = false);
     }
   }
 
-  Future<void> _loadCalendar() async {
+  Future<void> _loadCalendarFallback(int year) async {
+    // Le fallback API n'est pertinent que pour l'année en cours
+    if (year != DateTime.now().year) {
+      if (mounted) setState(() => _calendarLoading = false);
+      return;
+    }
     if (_calendarLoading) return;
     setState(() { _calendarLoading = true; _calendarData = null; });
     try {
-      final pages = await Future.wait(
-        List.generate(8, (i) => widget.service.getRecentTracks(limit: 50, page: i + 1)),
-      );
+      final now  = DateTime.now();
       final data = <String, int>{};
-      for (final page in pages) {
-        final raw  = page['track'];
+      final futures = List.generate(12, (i) {
+        final month = DateTime(now.year, now.month - (11 - i), 1);
+        final nextM = DateTime(month.year, month.month + 1, 1);
+        return widget.service.getRecentTracks(
+          limit: 200, page: 1,
+          from: month.millisecondsSinceEpoch ~/ 1000,
+          to:   nextM.millisecondsSinceEpoch ~/ 1000,
+        ).catchError((_) => <String, dynamic>{});
+      });
+      final pages = await Future.wait(futures);
+      for (final pageData in pages) {
+        final raw  = pageData['track'];
         final list = raw is List ? raw : (raw != null ? [raw] : <dynamic>[]);
         for (final t in list) {
           final m = t as Map?;
@@ -142,23 +246,24 @@ class _ChartsPageState extends State<_ChartsPage>
           if (sec == null) continue;
           final dt  = DateTime.fromMillisecondsSinceEpoch(sec * 1000);
           final key = '${dt.year}-${dt.month.toString().padLeft(2, '0')}-'
-                      '${dt.day.toString().padLeft(2, '0')}';
+              '${dt.day.toString().padLeft(2, '0')}';
           data[key] = (data[key] ?? 0) + 1;
         }
       }
       if (!mounted) return;
       setState(() { _calendarData = data; _calendarLoading = false; });
     } catch (_) {
-      if (!mounted) return;
-      setState(() => _calendarLoading = false);
+      if (mounted) setState(() => _calendarLoading = false);
     }
   }
+
+  // ── Genres (all-time) ─────────────────────────────────────────────────────
 
   Future<void> _loadTags() async {
     if (_topArtists.isEmpty || _tagsLoading) return;
     setState(() { _tagsLoading = true; _tags = []; });
     try {
-      final artists = _topArtists.take(10).toList();
+      final artists  = _topArtists.take(10).toList();
       final tagLists = await Future.wait(
         artists.map((a) => widget.service
             .getArtistTopTags((a['name'] ?? '').toString())
@@ -167,7 +272,7 @@ class _ChartsPageState extends State<_ChartsPage>
       final agg = <String, int>{};
       for (var i = 0; i < artists.length; i++) {
         final plays = int.tryParse((artists[i]['playcount'] ?? '1').toString()) ?? 1;
-        for (final t in (tagLists[i] as List).take(5)) {
+        for (final t in tagLists[i].take(5)) {
           final name = (t['name'] ?? '').toString().trim();
           if (name.isEmpty || name.length > 20) continue;
           agg[name] = (agg[name] ?? 0) + plays;
@@ -176,14 +281,193 @@ class _ChartsPageState extends State<_ChartsPage>
       final sorted = agg.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
       if (!mounted) return;
       setState(() {
-        _tags = sorted.take(8).map((e) => _TagEntry(name: e.key, count: e.value)).toList();
+        _tags       = sorted.take(8).map((e) => _TagEntry(name: e.key, count: e.value)).toList();
         _tagsLoading = false;
       });
     } catch (_) {
-      if (!mounted) return;
-      setState(() => _tagsLoading = false);
+      if (mounted) setState(() => _tagsLoading = false);
     }
   }
+
+  // ── Années disponibles ────────────────────────────────────────────────────
+
+  void _refreshAvailableYears() {
+    if (!mounted) return;
+    final cached      = AllScrobblesService.getCachedYears().toSet();
+    final currentYear = DateTime.now().year;
+    cached.add(currentYear); // l'année en cours est toujours accessible (fallback)
+    final sorted = cached.toList()..sort();
+    setState(() => _availableYears = sorted);
+  }
+
+  void _onYearChanged(int year) {
+    if (year == _selectedYear) return;
+    setState(() {
+      _selectedYear    = year;
+      _monthly         = null;
+      _hourlyData      = null;
+      _weekdayData     = null;
+      _calendarData    = null;
+      _hourlyLoading   = true;
+      _calendarLoading = true;
+    });
+    _loadYearData(year);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  Widgets de navigation
+  // ══════════════════════════════════════════════════════════════════════════
+
+  Widget _buildYearSelector(ColorScheme s, TextTheme t) {
+    final canPrev = _availableYears.indexOf(_selectedYear) > 0;
+    final canNext = _availableYears.indexOf(_selectedYear) < _availableYears.length - 1;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: s.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: s.outlineVariant.withValues(alpha: 0.5)),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        IconButton(
+          icon: const Icon(Icons.chevron_left_rounded),
+          iconSize: 20,
+          visualDensity: VisualDensity.compact,
+          color: canPrev ? s.primary : s.onSurfaceVariant.withValues(alpha: 0.3),
+          onPressed: canPrev
+              ? () => _onYearChanged(
+                  _availableYears[_availableYears.indexOf(_selectedYear) - 1])
+              : null,
+        ),
+        Text(
+          '$_selectedYear',
+          style: t.titleSmall?.copyWith(
+              fontWeight: FontWeight.w800, color: s.onSurface),
+        ),
+        IconButton(
+          icon: const Icon(Icons.chevron_right_rounded),
+          iconSize: 20,
+          visualDensity: VisualDensity.compact,
+          color: canNext ? s.primary : s.onSurfaceVariant.withValues(alpha: 0.3),
+          onPressed: canNext
+              ? () => _onYearChanged(
+                  _availableYears[_availableYears.indexOf(_selectedYear) + 1])
+              : null,
+        ),
+      ]),
+    );
+  }
+
+  Widget _buildHistoryBanner(BuildContext context) {
+    final s = Theme.of(context).colorScheme;
+    final t = Theme.of(context).textTheme;
+    final p = _historyProgress;
+
+    if (p.isDone) return const SizedBox.shrink();
+
+    if (p.isLoading) {
+      // Progression en cours
+      final yearLabel = p.currentYear != null ? ' ${p.currentYear}' : '';
+      final pct = (p.fraction * 100).round();
+      return Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: s.primaryContainer.withValues(alpha: 0.45),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+              color: s.primary.withValues(alpha: 0.2), width: 1),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            SizedBox(
+              width: 14, height: 14,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: s.primary),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                _ct(
+                  'Chargement de l\'historique$yearLabel… $pct %',
+                  'Loading history$yearLabel… $pct%',
+                ),
+                style: t.bodySmall?.copyWith(
+                    color: s.onPrimaryContainer,
+                    fontWeight: FontWeight.w600),
+              ),
+            ),
+          ]),
+          const SizedBox(height: 6),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: p.fraction,
+              minHeight: 4,
+              backgroundColor: s.primary.withValues(alpha: 0.12),
+              valueColor: AlwaysStoppedAnimation<Color>(s.primary),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            _ct(
+              'Les graphiques seront plus précis une fois chargé.',
+              'Charts will be more accurate once loaded.',
+            ),
+            style: t.labelSmall?.copyWith(
+                color: s.onPrimaryContainer.withValues(alpha: 0.65),
+                fontSize: 10),
+          ),
+        ]),
+      );
+    }
+
+    // Pas encore démarré (idle)
+    if (p.isIdle) {
+      return Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: s.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+              color: s.outlineVariant.withValues(alpha: 0.5), width: 1),
+        ),
+        child: Row(children: [
+          Icon(Icons.cloud_download_outlined,
+              size: 16, color: s.onSurfaceVariant),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _ct(
+                'Chargez l\'historique complet pour accéder à toutes les années.',
+                'Load the full history to access all years.',
+              ),
+              style: t.bodySmall?.copyWith(color: s.onSurfaceVariant),
+            ),
+          ),
+          const SizedBox(width: 8),
+          FilledButton.tonal(
+            onPressed: () => AllScrobblesService.loadAll(widget.service),
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              textStyle: t.labelSmall,
+            ),
+            child: Text(_ct('Charger', 'Load')),
+          ),
+        ]),
+      );
+    }
+
+    return const SizedBox.shrink();
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  Build
+  // ══════════════════════════════════════════════════════════════════════════
 
   @override
   Widget build(BuildContext context) {
@@ -196,9 +480,37 @@ class _ChartsPageState extends State<_ChartsPage>
 
     final monthly    = _monthly ?? {};
     final sortedKeys = monthly.keys.toList()..sort();
-    int cum = 0;
-    final cumulData = <String, int>{};
-    for (final k in sortedKeys) { cum += monthly[k]!; cumulData[k] = cum; }
+
+    // Données cumulées (depuis all-scrobbles si dispo, sinon depuis _monthly)
+    Map<String, int> cumulData = {};
+    final cachedTs = AllScrobblesService.getTimestampsForYear(_selectedYear);
+    if (cachedTs != null) {
+      cumulData = AllScrobblesService.computeYearCumulative(
+          cachedTs, _selectedYear);
+    } else {
+      int cum = 0;
+      for (final k in sortedKeys) {
+        cum += monthly[k]!;
+        cumulData[k] = cum;
+      }
+    }
+
+    // Source des données d'habitudes
+    final hasFullData = cachedTs != null;
+    final habitsSubtitle = hasFullData
+        ? _ct(
+            'Basé sur $_hourlyCount scrobbles de $_selectedYear',
+            'Based on $_hourlyCount scrobbles from $_selectedYear',
+          )
+        : _hourlyCount > 0
+            ? _ct(
+                'Basé sur $_hourlyCount scrobbles récents',
+                'Based on $_hourlyCount recent scrobbles',
+              )
+            : _ct(
+                'Analyse vos ~200 derniers scrobbles',
+                'Analysing your last ~200 scrobbles',
+              );
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -206,26 +518,55 @@ class _ChartsPageState extends State<_ChartsPage>
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 40),
         children: [
           const SizedBox(height: 16),
-          Text(L.chartsTitle,
-              style: text.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
-          const SizedBox(height: 2),
-          Text(
-            _ct('Vos écoutes en images — tendances et évolutions',
-                'Your scrobbles visualised — trends and evolutions'),
-            style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-          ),
-          const SizedBox(height: 20),
 
-          // ── 1. Monthly bars ───────────────────────────────────────────
+          // ── En-tête ───────────────────────────────────────────────────────
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(L.chartsTitle,
+                        style: text.headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 2),
+                    Text(
+                      _ct('Vos écoutes en images — tendances et évolutions',
+                          'Your scrobbles visualised — trends and evolutions'),
+                      style: text.bodySmall
+                          ?.copyWith(color: scheme.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+              ),
+              if (_availableYears.length > 1)
+                _buildYearSelector(scheme, text),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          // ── Bannière chargement historique ────────────────────────────────
+          _buildHistoryBanner(context),
+
+          // ── 1. Barres mensuelles ──────────────────────────────────────────
           _SectionHeader(title: L.chartsMonthly, icon: Icons.calendar_month_rounded),
           const SizedBox(height: 12),
           if (monthly.isNotEmpty) _MonthlyCard(monthly: monthly),
           const SizedBox(height: 24),
 
-          // ── 2. Cumulative line ────────────────────────────────────────
+          // ── 2. Courbe cumulative ──────────────────────────────────────────
           if (cumulData.length >= 2) ...[
             _SectionHeader(
-              title: _ct("Progression du total d'écoutes", 'Cumulative scrobble progression'),
+              title: hasFullData
+                  ? _ct(
+                      'Progression des scrobbles — $_selectedYear',
+                      'Scrobble progression — $_selectedYear',
+                    )
+                  : _ct(
+                      "Progression du total d'écoutes",
+                      'Cumulative scrobble progression',
+                    ),
               icon: Icons.trending_up_rounded,
             ),
             const SizedBox(height: 12),
@@ -233,14 +574,17 @@ class _ChartsPageState extends State<_ChartsPage>
             const SizedBox(height: 24),
           ],
 
-          // ── 3. Genre tags ─────────────────────────────────────────────
+          // ── 3. Genres musicaux (all-time) ─────────────────────────────────
           _SectionHeader(
             title: _ct('Vos genres musicaux', 'Your musical genres'),
             icon: Icons.equalizer_rounded,
           ),
-          const SizedBox(height: 8),
-          Text(_ct('Basé sur vos top artistes', 'Based on your top artists'),
-              style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+          const SizedBox(height: 4),
+          Text(
+            _ct('Basé sur vos top artistes (all-time)',
+                'Based on your top artists (all-time)'),
+            style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+          ),
           const SizedBox(height: 12),
           if (_tagsLoading)
             const Center(child: Padding(
@@ -251,20 +595,14 @@ class _ChartsPageState extends State<_ChartsPage>
             _TagsCard(tags: _tags),
           const SizedBox(height: 24),
 
-          // ── 4. Listening habits ───────────────────────────────────────
+          // ── 4. Habitudes d'écoute ─────────────────────────────────────────
           _SectionHeader(
             title: _ct("Habitudes d'écoute", 'Listening habits'),
             icon: Icons.access_time_rounded,
           ),
-          const SizedBox(height: 8),
-          Text(
-            _hourlyCount > 0
-                ? _ct('Basé sur $_hourlyCount scrobbles récents',
-                      'Based on $_hourlyCount recent scrobbles')
-                : _ct('Analyse vos ~200 derniers scrobbles',
-                      'Analyses your last ~200 scrobbles'),
-            style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-          ),
+          const SizedBox(height: 4),
+          Text(habitsSubtitle,
+              style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
           const SizedBox(height: 12),
           if (_hourlyLoading)
             const Center(child: Padding(
@@ -278,47 +616,67 @@ class _ChartsPageState extends State<_ChartsPage>
           ],
           const SizedBox(height: 24),
 
-          // ── 5. Artist donut ───────────────────────────────────────────
+          // ── 5. Répartition artistes (all-time) ────────────────────────────
           if (_topArtists.isNotEmpty) ...[
             _SectionHeader(title: L.chartsArtistDist, icon: Icons.mic_rounded),
+            const SizedBox(height: 4),
+            Text(_ct('All-time', 'All-time'),
+                style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
             const SizedBox(height: 12),
             _DonutDistributionCard(
-              items:    _topArtists,
-              getLabel: (e) => (e['name'] ?? '').toString(),
-              getPlays: (e) => int.tryParse((e['playcount'] ?? '0').toString()) ?? 0,
-              baseColor: scheme.primary,
+              items:      _topArtists,
+              getLabel:   (e) => (e['name'] ?? '').toString(),
+              getPlays:   (e) =>
+                  int.tryParse((e['playcount'] ?? '0').toString()) ?? 0,
+              baseColor:  scheme.primary,
+              secondColor: scheme.tertiary,
               onTap: (e) => showDetailSheet(context,
                   Map<String, dynamic>.from(e as Map), 'artists', widget.service),
             ),
             const SizedBox(height: 24),
           ],
 
-          // ── 6. Album donut ────────────────────────────────────────────
+          // ── 6. Répartition albums (all-time) ──────────────────────────────
           if (_topAlbums.isNotEmpty) ...[
             _SectionHeader(
               title: _ct('Répartition par album', 'Album distribution'),
               icon: Icons.album_rounded,
             ),
+            const SizedBox(height: 4),
+            Text(_ct('All-time', 'All-time'),
+                style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
             const SizedBox(height: 12),
             _DonutDistributionCard(
-              items:    _topAlbums,
-              getLabel: (e) => (e['name'] ?? '').toString(),
-              getPlays: (e) => int.tryParse((e['playcount'] ?? '0').toString()) ?? 0,
-              baseColor: scheme.secondary,
+              items:      _topAlbums,
+              getLabel:   (e) => (e['name'] ?? '').toString(),
+              getPlays:   (e) =>
+                  int.tryParse((e['playcount'] ?? '0').toString()) ?? 0,
+              baseColor:  scheme.secondary,
+              secondColor: scheme.primary,
               onTap: (e) => showDetailSheet(context,
                   Map<String, dynamic>.from(e as Map), 'albums', widget.service),
             ),
             const SizedBox(height: 24),
           ],
 
-          // ── 7. Calendar heatmap ───────────────────────────────────────
+          // ── 7. Calendrier musical ─────────────────────────────────────────
           _SectionHeader(
             title: _ct('Calendrier musical', 'Listening calendar'),
             icon: Icons.grid_on_rounded,
           ),
-          const SizedBox(height: 8),
-          Text(_ct('Activité récente jour par jour', 'Recent activity day by day'),
-              style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+          const SizedBox(height: 4),
+          Text(
+            hasFullData
+                ? _ct(
+                    'Activité journalière — $_selectedYear',
+                    'Daily activity — $_selectedYear',
+                  )
+                : _ct(
+                    'Activité journalière sur 12 mois',
+                    'Daily activity over 12 months',
+                  ),
+            style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+          ),
           const SizedBox(height: 12),
           if (_calendarLoading)
             const Center(child: Padding(
@@ -326,7 +684,8 @@ class _ChartsPageState extends State<_ChartsPage>
               child: CircularProgressIndicator(),
             ))
           else if (_calendarData != null)
-            _CalendarCard(data: _calendarData!),
+            _CalendarCard(data: _calendarData!, year: _selectedYear,
+                fullYear: hasFullData),
           const SizedBox(height: 20),
         ],
       ),
@@ -335,13 +694,14 @@ class _ChartsPageState extends State<_ChartsPage>
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-//  Helper: card decoration shared by all chart cards
+//  Shared helpers
 // ══════════════════════════════════════════════════════════════════════════
 
+/// Card decoration commune : surface M3, bord léger.
 BoxDecoration _chartCardDecoration(ColorScheme s) => BoxDecoration(
-  color: s.surfaceContainerHighest,
+  color: s.surfaceContainerLow,
   borderRadius: BorderRadius.circular(16),
-  border: Border.all(color: s.outlineVariant.withValues(alpha: 0.45), width: 1),
+  border: Border.all(color: s.outlineVariant.withValues(alpha: 0.50), width: 1),
 );
 
 Widget _scrollHint(BuildContext context) {
@@ -351,13 +711,37 @@ Widget _scrollHint(BuildContext context) {
     child: Text(
       _ct('← glisser pour naviguer', '← swipe to navigate'),
       style: t.labelSmall?.copyWith(
-          fontSize: 9, color: s.onSurfaceVariant.withValues(alpha: 0.55)),
+          fontSize: 9, color: s.onSurfaceVariant.withValues(alpha: 0.5)),
     ),
   );
 }
 
+/// Palette M3 : interpole entre [base] et [second] puis HSL pour les suivants.
+List<Color> _buildPalette(Color base, Color second, int count) {
+  if (count == 0) return [];
+  if (count == 1) return [base];
+
+  return List.generate(count, (i) {
+    final t = i / (count - 1);
+    if (t <= 1.0) {
+      final hslA = HSLColor.fromColor(base);
+      final hslB = HSLColor.fromColor(second);
+      double hueDiff = (hslB.hue - hslA.hue + 540) % 360 - 180;
+      return HSLColor.fromAHSL(
+        1.0,
+        (hslA.hue + hueDiff * t + 360) % 360,
+        (hslA.saturation + (hslB.saturation - hslA.saturation) * t)
+            .clamp(0.40, 0.90),
+        (hslA.lightness  + (hslB.lightness  - hslA.lightness)  * t)
+            .clamp(0.35, 0.65),
+      ).toColor();
+    }
+    return base;
+  });
+}
+
 // ══════════════════════════════════════════════════════════════════════════
-//  _MonthlyCard  — scrollable bar chart (fixed-height bars, no FractionallySizedBox)
+//  _MonthlyCard — barres mensuelles scrollables
 // ══════════════════════════════════════════════════════════════════════════
 
 class _MonthlyCard extends StatefulWidget {
@@ -401,70 +785,90 @@ class _MonthlyCardState extends State<_MonthlyCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Stat chips
           Wrap(spacing: 8, children: [
             _ChipStat(label: _ct('Total', 'Total'), value: _fmt(total), s: s, t: t),
             _ChipStat(label: _ct('Moy./mois', 'Avg/mo'), value: _fmt(avg), s: s, t: t),
           ]),
           const SizedBox(height: 16),
 
-          // Bar area — fixed pixel heights
-          SingleChildScrollView(
-            controller: _sc,
-            scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: sorted.map((e) {
-                final ratio  = maxVal > 0 ? e.value / maxVal : 0.0;
-                final barH   = (_barMaxH * ratio).clamp(2.0, _barMaxH);
-                final isMax  = e.value == maxVal;
-                final color  = isMax
-                    ? s.primary
-                    : s.primary.withValues(alpha: 0.28 + ratio * 0.60);
-                return SizedBox(
-                  width: _colW,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      Text(
-                        ratio > 0.15 ? _fmt(e.value) : '',
-                        textAlign: TextAlign.center,
-                        style: t.labelSmall?.copyWith(
-                          fontSize: 8,
-                          color: isMax ? s.primary : s.onSurfaceVariant,
-                          fontWeight: isMax ? FontWeight.w800 : FontWeight.normal,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Align(
-                        alignment: Alignment.bottomCenter,
-                        child: Container(
-                          width: _colW - 10,
-                          height: barH,
-                          decoration: BoxDecoration(
-                            color: color,
-                            borderRadius: const BorderRadius.vertical(
-                                top: Radius.circular(5)),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        e.key.substring(5),
-                        textAlign: TextAlign.center,
-                        style: t.labelSmall?.copyWith(
-                          fontSize: 9,
-                          color: isMax ? s.primary : s.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }).toList(),
+          // Y-axis fixe + barres scrollables
+          Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            // Axe Y : 3 niveaux
+            SizedBox(
+              width: 34,
+              height: _barMaxH + 14,
+              child: Stack(
+                children: [
+                  Positioned(top: 0, right: 4,
+                      child: Text(_fmt(maxVal),
+                          style: t.labelSmall?.copyWith(
+                              fontSize: 8, color: s.onSurfaceVariant))),
+                  Positioned(top: _barMaxH * 0.5 - 5, right: 4,
+                      child: Text(_fmt(maxVal ~/ 2),
+                          style: t.labelSmall?.copyWith(
+                              fontSize: 8, color: s.onSurfaceVariant.withValues(alpha: 0.6)))),
+                ],
+              ),
             ),
-          ),
+            Expanded(
+              child: SingleChildScrollView(
+                controller: _sc,
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: sorted.map((e) {
+                    final ratio = maxVal > 0 ? e.value / maxVal : 0.0;
+                    final barH  = (_barMaxH * ratio).clamp(2.0, _barMaxH);
+                    final isMax = e.value == maxVal;
+                    final color = isMax
+                        ? s.primary
+                        : Color.lerp(s.primaryContainer, s.primary, ratio * 0.75)!;
+                    return SizedBox(
+                      width: _colW,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Text(
+                            ratio > 0.12 ? _fmt(e.value) : '',
+                            textAlign: TextAlign.center,
+                            style: t.labelSmall?.copyWith(
+                              fontSize: 8,
+                              color: isMax ? s.primary : s.onSurfaceVariant,
+                              fontWeight: isMax ? FontWeight.w800 : FontWeight.normal,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Align(
+                            alignment: Alignment.bottomCenter,
+                            child: Container(
+                              width: _colW - 10,
+                              height: barH,
+                              decoration: BoxDecoration(
+                                color: color,
+                                borderRadius: const BorderRadius.vertical(
+                                    top: Radius.circular(5)),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            e.key.substring(5),
+                            textAlign: TextAlign.center,
+                            style: t.labelSmall?.copyWith(
+                              fontSize: 9,
+                              color: isMax ? s.primary : s.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+          ]),
           const SizedBox(height: 6),
           _scrollHint(context),
         ],
@@ -474,7 +878,7 @@ class _MonthlyCardState extends State<_MonthlyCard> {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-//  _CumulativeLineCard  — scrollable line chart via CustomPaint
+//  _CumulativeLineCard — ligne cumulative avec axe Y fixe
 // ══════════════════════════════════════════════════════════════════════════
 
 class _CumulativeLineCard extends StatefulWidget {
@@ -487,7 +891,8 @@ class _CumulativeLineCard extends StatefulWidget {
 
 class _CumulativeLineCardState extends State<_CumulativeLineCard> {
   final _sc = ScrollController();
-  static const _ptW = 42.0;
+  static const _ptW    = 42.0;
+  static const _chartH = 130.0;
 
   @override
   void initState() {
@@ -506,7 +911,8 @@ class _CumulativeLineCardState extends State<_CumulativeLineCard> {
     final t    = Theme.of(context).textTheme;
     final keys = widget.data.keys.toList()..sort();
     final vals = keys.map((k) => widget.data[k]!.toDouble()).toList();
-    final total = vals.isEmpty ? 0 : vals.last.toInt();
+    final maxVal = vals.isEmpty ? 0.0 : vals.last;
+    final total  = vals.isEmpty ? 0 : vals.last.toInt();
 
     String bestMonth = ''; int bestDelta = 0;
     for (var i = 1; i < keys.length; i++) {
@@ -514,8 +920,10 @@ class _CumulativeLineCardState extends State<_CumulativeLineCard> {
       if (delta > bestDelta) { bestDelta = delta; bestMonth = keys[i]; }
     }
 
-    const chartH = 120.0;
     final contentW = (_ptW * keys.length).clamp(1.0, double.infinity);
+
+    // 4 niveaux Y : 100%, 75%, 50%, 25% du max
+    final yLevels = [1.0, 0.75, 0.50, 0.25];
 
     return Container(
       decoration: _chartCardDecoration(s),
@@ -533,45 +941,81 @@ class _CumulativeLineCardState extends State<_CumulativeLineCard> {
               ),
           ]),
           const SizedBox(height: 16),
-          SingleChildScrollView(
-            controller: _sc,
-            scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  width: contentW,
-                  height: chartH,
-                  child: CustomPaint(
-                    painter: _LinePainter(keys: keys, values: vals, color: s.primary),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                SizedBox(
-                  width: contentW,
-                  child: Row(
-                    children: keys.asMap().entries.map((e) {
-                      final show = keys.length <= 12
-                          || e.key % (keys.length ~/ 8).clamp(1, 99) == 0
-                          || e.key == keys.length - 1;
-                      return SizedBox(
-                        width: _ptW,
-                        child: show
-                            ? Text(
-                                e.value.substring(5),
-                                textAlign: TextAlign.center,
-                                style: t.labelSmall?.copyWith(
-                                    fontSize: 8, color: s.onSurfaceVariant),
-                              )
-                            : const SizedBox.shrink(),
-                      );
-                    }).toList(),
-                  ),
-                ),
-              ],
+
+          // Axe Y fixe + graphique scrollable
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            // Axe Y
+            SizedBox(
+              width: 38,
+              height: _chartH,
+              child: Stack(
+                children: yLevels.map((ratio) {
+                  final topFrac = 1.0 - ratio * 0.88;
+                  return Positioned(
+                    top: _chartH * topFrac - 7,
+                    right: 4,
+                    child: Text(
+                      _fmt((maxVal * ratio).round()),
+                      style: t.labelSmall?.copyWith(
+                        fontSize: 8,
+                        color: ratio == 1.0
+                            ? s.primary
+                            : s.onSurfaceVariant.withValues(alpha: 0.6),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
             ),
-          ),
+
+            // Zone scrollable
+            Expanded(
+              child: SingleChildScrollView(
+                controller: _sc,
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: contentW,
+                      height: _chartH,
+                      child: CustomPaint(
+                        painter: _LinePainter(
+                          keys:      keys,
+                          values:    vals,
+                          color:     s.primary,
+                          gridColor: s.outlineVariant.withValues(alpha: 0.35),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    SizedBox(
+                      width: contentW,
+                      child: Row(
+                        children: keys.asMap().entries.map((e) {
+                          final show = keys.length <= 12
+                              || e.key % (keys.length ~/ 8).clamp(1, 99) == 0
+                              || e.key == keys.length - 1;
+                          return SizedBox(
+                            width: _ptW,
+                            child: show
+                                ? Text(
+                                    e.value.substring(5),
+                                    textAlign: TextAlign.center,
+                                    style: t.labelSmall?.copyWith(
+                                        fontSize: 8, color: s.onSurfaceVariant),
+                                  )
+                                : const SizedBox.shrink(),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ]),
           const SizedBox(height: 6),
           _scrollHint(context),
         ],
@@ -584,7 +1028,13 @@ class _LinePainter extends CustomPainter {
   final List<String> keys;
   final List<double> values;
   final Color        color;
-  const _LinePainter({required this.keys, required this.values, required this.color});
+  final Color        gridColor;
+  const _LinePainter({
+    required this.keys,
+    required this.values,
+    required this.color,
+    required this.gridColor,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -593,13 +1043,27 @@ class _LinePainter extends CustomPainter {
     final maxVal = values.reduce((a, b) => a > b ? a : b);
     if (maxVal == 0) return;
 
-    final w = size.width; final h = size.height;
+    final w = size.width;
+    final h = size.height;
+
+    // ── Lignes de grille horizontales ─────────────────────────────────────
+    final gridPaint = Paint()
+      ..color = gridColor
+      ..strokeWidth = 0.8;
+    for (final ratio in [1.0, 0.75, 0.50, 0.25]) {
+      final y = h - ratio * h * 0.88;
+      canvas.drawLine(Offset(0, y), Offset(w, y), gridPaint);
+    }
+
     final pts = List.generate(n, (i) => Offset(
       i * w / (n - 1),
-      h - (values[i] / maxVal) * h * 0.90,
+      h - (values[i] / maxVal) * h * 0.88,
     ));
 
-    final fill = Path()..moveTo(pts[0].dx, h)..lineTo(pts[0].dx, pts[0].dy);
+    // ── Remplissage dégradé ───────────────────────────────────────────────
+    final fill = Path()
+      ..moveTo(pts[0].dx, h)
+      ..lineTo(pts[0].dx, pts[0].dy);
     for (var i = 1; i < pts.length; i++) {
       final cx = (pts[i - 1].dx + pts[i].dx) / 2;
       fill.cubicTo(cx, pts[i - 1].dy, cx, pts[i].dy, pts[i].dx, pts[i].dy);
@@ -608,9 +1072,10 @@ class _LinePainter extends CustomPainter {
     canvas.drawPath(fill, Paint()
       ..shader = LinearGradient(
         begin: Alignment.topCenter, end: Alignment.bottomCenter,
-        colors: [color.withValues(alpha: 0.30), color.withValues(alpha: 0.03)],
+        colors: [color.withValues(alpha: 0.28), color.withValues(alpha: 0.03)],
       ).createShader(Rect.fromLTWH(0, 0, w, h)));
 
+    // ── Ligne ─────────────────────────────────────────────────────────────
     final line = Path()..moveTo(pts[0].dx, pts[0].dy);
     for (var i = 1; i < pts.length; i++) {
       final cx = (pts[i - 1].dx + pts[i].dx) / 2;
@@ -620,13 +1085,15 @@ class _LinePainter extends CustomPainter {
       ..color = color ..strokeWidth = 2.5
       ..style = PaintingStyle.stroke ..strokeCap = StrokeCap.round);
 
-    canvas.drawCircle(pts.last, 5, Paint()..color = color.withValues(alpha: 0.22));
-    canvas.drawCircle(pts.last, 3, Paint()..color = color);
+    // ── Point final ───────────────────────────────────────────────────────
+    canvas.drawCircle(pts.last, 6, Paint()..color = color.withValues(alpha: 0.18));
+    canvas.drawCircle(pts.last, 3.5, Paint()..color = color);
     canvas.drawCircle(pts.last, 1.5, Paint()..color = Colors.white);
   }
 
   @override
-  bool shouldRepaint(_LinePainter old) => old.values != values || old.color != color;
+  bool shouldRepaint(_LinePainter old) =>
+      old.values != values || old.color != color;
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -639,9 +1106,9 @@ class _TagsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final s       = Theme.of(context).colorScheme;
-    final t       = Theme.of(context).textTheme;
-    final palette = _buildPalette(s.primary, tags.length);
+    final s      = Theme.of(context).colorScheme;
+    final t      = Theme.of(context).textTheme;
+    final palette = _buildPalette(s.primary, s.tertiary, tags.length);
     final maxVal  = tags.isEmpty ? 1
         : tags.map((e) => e.count).reduce((a, b) => a > b ? a : b);
 
@@ -669,7 +1136,7 @@ class _TagsCard extends StatelessWidget {
               ClipRRect(
                 borderRadius: BorderRadius.circular(4),
                 child: LinearProgressIndicator(
-                  value: ratio, minHeight: 6,
+                  value: ratio, minHeight: 7,
                   backgroundColor: color.withValues(alpha: 0.15),
                   valueColor: AlwaysStoppedAnimation<Color>(color),
                 ),
@@ -683,7 +1150,7 @@ class _TagsCard extends StatelessWidget {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-//  _HourlyBarCard  — scrollable 24h bars, fixed height
+//  _HourlyBarCard — répartition horaire
 // ══════════════════════════════════════════════════════════════════════════
 
 class _HourlyBarCard extends StatefulWidget {
@@ -696,8 +1163,16 @@ class _HourlyBarCard extends StatefulWidget {
 
 class _HourlyBarCardState extends State<_HourlyBarCard> {
   final _sc = ScrollController();
-  static const _colW    = 32.0;
-  static const _barMaxH = 80.0;
+  static const _colW        = 33.0;
+  static const _barMaxH     = 90.0;
+  static const _kBandLabelH = 20.0;
+
+  static const _bands = [
+    (start: 0,  end: 5,  emoji: '🌙', fr: 'Nuit',       en: 'Night'),
+    (start: 6,  end: 11, emoji: '☀️', fr: 'Matin',       en: 'Morning'),
+    (start: 12, end: 17, emoji: '🌤', fr: 'Après-midi',  en: 'Afternoon'),
+    (start: 18, end: 23, emoji: '🌆', fr: 'Soir',        en: 'Evening'),
+  ];
 
   @override
   void initState() {
@@ -717,8 +1192,10 @@ class _HourlyBarCardState extends State<_HourlyBarCard> {
   void dispose() { _sc.dispose(); super.dispose(); }
 
   static String _emoji(int h) {
-    if (h < 6) return '🌙'; if (h < 12) return '☀️';
-    if (h < 18) return '🌤'; return '🌆';
+    if (h <= 5)  return '🌙';
+    if (h <= 11) return '☀️';
+    if (h <= 17) return '🌤';
+    return '🌆';
   }
 
   @override
@@ -728,6 +1205,14 @@ class _HourlyBarCardState extends State<_HourlyBarCard> {
     final maxVal = widget.data.values.fold(0, (a, b) => a > b ? a : b);
     final peakH  = widget.data.isEmpty ? 0
         : widget.data.entries.reduce((a, b) => a.value >= b.value ? a : b).key;
+    final isEn   = localeNotifier.value == 'en';
+
+    final bandColors = [
+      s.primaryContainer.withValues(alpha: 0.08),
+      s.tertiaryContainer.withValues(alpha: 0.10),
+      s.secondaryContainer.withValues(alpha: 0.10),
+      s.primaryContainer.withValues(alpha: 0.08),
+    ];
 
     return Container(
       decoration: _chartCardDecoration(s),
@@ -745,66 +1230,137 @@ class _HourlyBarCardState extends State<_HourlyBarCard> {
             ),
           ]),
           const SizedBox(height: 14),
-
-          SingleChildScrollView(
-            controller: _sc,
-            scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: List.generate(24, (h) {
-                final v      = widget.data[h] ?? 0;
-                final ratio  = maxVal > 0 ? v / maxVal : 0.0;
-                final barH   = (_barMaxH * ratio).clamp(2.0, _barMaxH);
-                final isPeak = h == peakH;
-                final color  = isPeak
-                    ? s.primary
-                    : s.primary.withValues(alpha: 0.20 + ratio * 0.65);
-
-                return SizedBox(
-                  width: _colW,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      Text(
-                        (isPeak && v > 0) ? _fmt(v) : '',
-                        style: t.labelSmall?.copyWith(
-                            fontSize: 8, color: s.primary,
-                            fontWeight: FontWeight.w800),
-                      ),
-                      const SizedBox(height: 2),
-                      Container(
-                        width: _colW - 8,
-                        height: barH,
-                        decoration: BoxDecoration(
-                          color: color,
-                          borderRadius: const BorderRadius.vertical(
-                              top: Radius.circular(4)),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text('${h}h',
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            SizedBox(
+              width: 30,
+              height: _kBandLabelH + _barMaxH + 24,
+              child: Stack(
+                children: [
+                  Positioned(top: _kBandLabelH, right: 4,
+                      child: Text(_fmt(maxVal),
                           style: t.labelSmall?.copyWith(
-                            fontSize: 8,
-                            color: isPeak
-                                ? s.primary
-                                : s.onSurfaceVariant.withValues(alpha: 0.6),
-                          )),
+                              fontSize: 8, color: s.onSurfaceVariant))),
+                  Positioned(top: _kBandLabelH + _barMaxH * 0.5 - 5, right: 4,
+                      child: Text(_fmt(maxVal ~/ 2),
+                          style: t.labelSmall?.copyWith(
+                              fontSize: 8,
+                              color: s.onSurfaceVariant.withValues(alpha: 0.55)))),
+                ],
+              ),
+            ),
+            Expanded(
+              child: SingleChildScrollView(
+                controller: _sc,
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                child: SizedBox(
+                  width: 24 * _colW,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: _bands.map((b) {
+                          final bandW = (b.end - b.start + 1) * _colW;
+                          final label = isEn ? b.en : b.fr;
+                          return Container(
+                            width: bandW,
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: Text('${b.emoji} $label',
+                                textAlign: TextAlign.center,
+                                style: t.labelSmall?.copyWith(
+                                    fontSize: 9,
+                                    color: s.onSurfaceVariant.withValues(alpha: 0.7))),
+                          );
+                        }).toList(),
+                      ),
+                      Stack(
+                        alignment: Alignment.bottomLeft,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: _bands.asMap().entries.map((e) {
+                              final b = e.value;
+                              final bandW = (b.end - b.start + 1) * _colW;
+                              return Container(
+                                width: bandW,
+                                height: _barMaxH + 20,
+                                decoration: BoxDecoration(
+                                  color: bandColors[e.key],
+                                  border: Border(
+                                    left: BorderSide(
+                                      color: s.outlineVariant.withValues(alpha: 0.25),
+                                      width: 0.5,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: List.generate(24, (h) {
+                              final v      = widget.data[h] ?? 0;
+                              final ratio  = maxVal > 0 ? v / maxVal : 0.0;
+                              final barH   = (_barMaxH * ratio).clamp(2.0, _barMaxH);
+                              final isPeak = h == peakH;
+                              final color  = isPeak
+                                  ? s.primary
+                                  : Color.lerp(
+                                      s.primaryContainer, s.primary, ratio * 0.8)!;
+                              return SizedBox(
+                                width: _colW,
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  mainAxisAlignment: MainAxisAlignment.end,
+                                  children: [
+                                    Text(
+                                      (isPeak || ratio > 0.20) && v > 0
+                                          ? _fmt(v)
+                                          : '',
+                                      style: t.labelSmall?.copyWith(
+                                          fontSize: 8,
+                                          color: isPeak ? s.primary : s.onSurfaceVariant,
+                                          fontWeight: isPeak
+                                              ? FontWeight.w800 : FontWeight.w500),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Center(
+                                      child: Container(
+                                        width: _colW - 8,
+                                        height: barH,
+                                        decoration: BoxDecoration(
+                                          color: color,
+                                          borderRadius: const BorderRadius.vertical(
+                                              top: Radius.circular(4)),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      (h % 6 == 0 || isPeak) ? '${h}h' : '',
+                                      style: t.labelSmall?.copyWith(
+                                        fontSize: 8,
+                                        color: isPeak
+                                            ? s.primary
+                                            : s.onSurfaceVariant.withValues(alpha: 0.7),
+                                        fontWeight: isPeak
+                                            ? FontWeight.w800 : FontWeight.normal,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }),
+                          ),
+                        ],
+                      ),
                     ],
                   ),
-                );
-              }),
+                ),
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-            _BandLabel('🌙 0–5h',   s.onSurfaceVariant, t),
-            _BandLabel('☀️ 6–11h',  s.onSurfaceVariant, t),
-            _BandLabel('🌤 12–17h', s.onSurfaceVariant, t),
-            _BandLabel('🌆 18–23h', s.onSurfaceVariant, t),
           ]),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           _scrollHint(context),
         ],
       ),
@@ -813,7 +1369,7 @@ class _HourlyBarCardState extends State<_HourlyBarCard> {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-//  _WeekdayBarCard  — 7 bars, fixed height, fits in width
+//  _WeekdayBarCard — 7 barres pleine largeur
 // ══════════════════════════════════════════════════════════════════════════
 
 class _WeekdayBarCard extends StatelessWidget {
@@ -845,36 +1401,32 @@ class _WeekdayBarCard extends StatelessWidget {
             ),
           ]),
           const SizedBox(height: 14),
-          // Use LayoutBuilder to make bars fill the available width
           LayoutBuilder(builder: (_, constraints) {
             const barMaxH = 90.0;
             final colW    = constraints.maxWidth / 7;
             return Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: List.generate(7, (i) {
-                final day    = i + 1;
-                final v      = data[day] ?? 0;
-                final ratio  = maxVal > 0 ? v / maxVal : 0.0;
-                final barH   = (barMaxH * ratio).clamp(2.0, barMaxH);
+                final day   = i + 1;
+                final v     = data[day] ?? 0;
+                final ratio = maxVal > 0 ? v / maxVal : 0.0;
+                final barH  = (barMaxH * ratio).clamp(2.0, barMaxH);
                 final isPeak = day == peakDay;
-                final color  = isPeak
+                final color = isPeak
                     ? s.secondary
-                    : s.secondary.withValues(alpha: 0.20 + ratio * 0.65);
-
+                    : Color.lerp(s.secondaryContainer, s.secondary, ratio * 0.8)!;
                 return SizedBox(
                   width: colW,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
-                      Text(
-                        v > 0 ? _fmt(v) : '',
-                        style: t.labelSmall?.copyWith(
-                          fontSize: 8,
-                          color: isPeak ? s.secondary : s.onSurfaceVariant,
-                          fontWeight: isPeak ? FontWeight.w800 : FontWeight.normal,
-                        ),
-                      ),
+                      Text(v > 0 ? _fmt(v) : '',
+                          style: t.labelSmall?.copyWith(
+                            fontSize: 8,
+                            color: isPeak ? s.secondary : s.onSurfaceVariant,
+                            fontWeight: isPeak ? FontWeight.w800 : FontWeight.normal,
+                          )),
                       const SizedBox(height: 2),
                       Center(
                         child: Container(
@@ -888,15 +1440,12 @@ class _WeekdayBarCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 5),
-                      Text(
-                        labels[i],
-                        textAlign: TextAlign.center,
-                        style: t.labelSmall?.copyWith(
-                          fontSize: 10,
-                          color: isPeak ? s.secondary : s.onSurfaceVariant,
-                          fontWeight: isPeak ? FontWeight.w800 : FontWeight.normal,
-                        ),
-                      ),
+                      Text(labels[i], textAlign: TextAlign.center,
+                          style: t.labelSmall?.copyWith(
+                            fontSize: 10,
+                            color: isPeak ? s.secondary : s.onSurfaceVariant,
+                            fontWeight: isPeak ? FontWeight.w800 : FontWeight.normal,
+                          )),
                     ],
                   ),
                 );
@@ -918,10 +1467,15 @@ class _DonutDistributionCard extends StatelessWidget {
   final String Function(dynamic) getLabel;
   final int    Function(dynamic) getPlays;
   final Color                    baseColor;
+  final Color                    secondColor;
   final void   Function(dynamic) onTap;
   const _DonutDistributionCard({
-    required this.items, required this.getLabel,
-    required this.getPlays, required this.baseColor, required this.onTap,
+    required this.items,
+    required this.getLabel,
+    required this.getPlays,
+    required this.baseColor,
+    required this.secondColor,
+    required this.onTap,
   });
 
   @override
@@ -930,7 +1484,7 @@ class _DonutDistributionCard extends StatelessWidget {
     final t       = Theme.of(context).textTheme;
     final vals    = items.map(getPlays).toList();
     final total   = vals.fold<int>(0, (a, b) => a + b);
-    final palette = _buildPalette(baseColor, items.length);
+    final palette = _buildPalette(baseColor, secondColor, items.length);
 
     return Container(
       decoration: _chartCardDecoration(s),
@@ -942,7 +1496,7 @@ class _DonutDistributionCard extends StatelessWidget {
             painter: _DonutPainter(
               values:    vals.map((v) => v.toDouble()).toList(),
               colors:    palette,
-              holeColor: s.surfaceContainerHighest,
+              holeColor: s.surfaceContainerLow,
             ),
           ),
         ),
@@ -1024,12 +1578,18 @@ class _DonutPainter extends CustomPainter {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-//  _CalendarCard  — scrollable heatmap
+//  _CalendarCard — heatmap annuelle avec statistiques
 // ══════════════════════════════════════════════════════════════════════════
 
 class _CalendarCard extends StatefulWidget {
   final Map<String, int> data;
-  const _CalendarCard({required this.data});
+  final int  year;
+  final bool fullYear; // true = données complètes depuis AllScrobblesService
+  const _CalendarCard({
+    required this.data,
+    required this.year,
+    this.fullYear = false,
+  });
 
   @override
   State<_CalendarCard> createState() => _CalendarCardState();
@@ -1042,7 +1602,13 @@ class _CalendarCardState extends State<_CalendarCard> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_sc.hasClients) _sc.jumpTo(_sc.position.maxScrollExtent);
+      if (_sc.hasClients) {
+        // Pour l'année en cours → scroller à la fin ; pour le passé → début
+        final isCurrentYear = widget.year == DateTime.now().year;
+        if (isCurrentYear) {
+          _sc.jumpTo(_sc.position.maxScrollExtent);
+        }
+      }
     });
   }
 
@@ -1051,23 +1617,17 @@ class _CalendarCardState extends State<_CalendarCard> {
 
   @override
   Widget build(BuildContext context) {
-    final s      = Theme.of(context).colorScheme;
-    final t      = Theme.of(context).textTheme;
+    final s   = Theme.of(context).colorScheme;
+    final t   = Theme.of(context).textTheme;
+
+    // Toujours afficher les 12 mois de l'année sélectionnée
+    final months = List.generate(
+        12, (i) => DateTime(widget.year, i + 1, 1));
+
     final maxVal = widget.data.values.fold(0, (a, b) => a > b ? a : b);
-    final now    = DateTime.now();
 
-    final months = List.generate(6, (i) {
-      final d = DateTime(now.year, now.month - i, 1);
-      return DateTime(d.year, d.month, 1);
-    }).reversed.toList();
-
-    final yearStr    = '${now.year}';
-    final yearTotal  = widget.data.entries
-        .where((e) => e.key.startsWith(yearStr))
-        .fold(0, (a, b) => a + b.value);
-    final activeDays = widget.data.entries
-        .where((e) => e.key.startsWith(yearStr) && e.value > 0)
-        .length;
+    final totalAll   = widget.data.values.fold(0, (a, b) => a + b);
+    final activeDays = widget.data.entries.where((e) => e.value > 0).length;
     String bestDay = ''; int bestCount = 0;
     for (final e in widget.data.entries) {
       if (e.value > bestCount) { bestCount = e.value; bestDay = e.key; }
@@ -1080,7 +1640,12 @@ class _CalendarCardState extends State<_CalendarCard> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Wrap(spacing: 8, runSpacing: 6, children: [
-            _ChipStat(label: yearStr, value: _fmt(yearTotal), s: s, t: t),
+            _ChipStat(
+              label: widget.fullYear
+                  ? '${widget.year}'
+                  : _ct('12 mois', '12 months'),
+              value: _fmt(totalAll), s: s, t: t,
+            ),
             _ChipStat(
               label: _ct('Jours actifs', 'Active days'),
               value: '$activeDays', s: s, t: t,
@@ -1101,7 +1666,8 @@ class _CalendarCardState extends State<_CalendarCard> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: months.map((m) => Padding(
                 padding: const EdgeInsets.only(right: 14),
-                child: _MonthHeatGrid(month: m, data: widget.data, maxVal: maxVal, s: s, t: t),
+                child: _MonthHeatGrid(
+                    month: m, data: widget.data, maxVal: maxVal, s: s, t: t),
               )).toList(),
             ),
           ),
@@ -1118,7 +1684,8 @@ class _CalendarCardState extends State<_CalendarCard> {
               decoration: BoxDecoration(
                 color: i == 0
                     ? s.surfaceContainerHigh
-                    : s.primary.withValues(alpha: 0.15 + i * 0.18),
+                    : Color.lerp(s.primaryContainer, s.primary,
+                                 (i / 4).clamp(0.0, 1.0)),
                 borderRadius: BorderRadius.circular(2),
               ),
             )),
@@ -1133,11 +1700,11 @@ class _CalendarCardState extends State<_CalendarCard> {
 }
 
 class _MonthHeatGrid extends StatelessWidget {
-  final DateTime month;
+  final DateTime        month;
   final Map<String, int> data;
-  final int maxVal;
-  final ColorScheme s;
-  final TextTheme   t;
+  final int             maxVal;
+  final ColorScheme     s;
+  final TextTheme       t;
   const _MonthHeatGrid({
     required this.month, required this.data,
     required this.maxVal, required this.s, required this.t,
@@ -1160,15 +1727,12 @@ class _MonthHeatGrid extends StatelessWidget {
                 color: s.onSurfaceVariant, fontWeight: FontWeight.w700)),
         const SizedBox(height: 6),
         SizedBox(
-          // 7 columns
           width: cols * (cellSz + gap) - gap,
           child: Wrap(
             spacing: gap, runSpacing: gap,
             children: [
-              // offset empty cells
               ...List.generate(firstWd - 1,
                   (_) => SizedBox(width: cellSz, height: cellSz)),
-              // day cells
               ...List.generate(daysInMonth, (d) {
                 final day   = d + 1;
                 final key   = '${month.year}-'
@@ -1178,7 +1742,8 @@ class _MonthHeatGrid extends StatelessWidget {
                 final ratio = (maxVal > 0 && count > 0) ? count / maxVal : 0.0;
                 final color = count == 0
                     ? s.surfaceContainerHigh
-                    : s.primary.withValues(alpha: 0.18 + ratio.clamp(0, 1) * 0.80);
+                    : Color.lerp(s.primaryContainer, s.primary,
+                                 ratio.clamp(0.0, 1.0) * 0.9)!;
                 return Tooltip(
                   message: count > 0 ? '$day — $count scrobbles' : '',
                   child: Container(
@@ -1209,15 +1774,17 @@ class _ChipStat extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
     decoration: BoxDecoration(
-      color: s.primaryContainer.withValues(alpha: 0.6),
+      color: s.primaryContainer.withValues(alpha: 0.55),
       borderRadius: BorderRadius.circular(20),
+      border: Border.all(
+          color: s.primary.withValues(alpha: 0.15), width: 1),
     ),
     child: Row(mainAxisSize: MainAxisSize.min, children: [
       Text(label, style: t.labelSmall
-          ?.copyWith(color: s.onPrimaryContainer.withValues(alpha: 0.7))),
-      const SizedBox(width: 4),
+          ?.copyWith(color: s.onPrimaryContainer.withValues(alpha: 0.75))),
+      const SizedBox(width: 5),
       Text(value, style: t.labelSmall?.copyWith(
           color: s.onPrimaryContainer, fontWeight: FontWeight.w800)),
     ]),
@@ -1233,30 +1800,11 @@ class _PeakChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
     decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(20)),
     child: Text(label,
         style: t.labelSmall?.copyWith(color: onColor, fontWeight: FontWeight.w700)),
   );
-}
-
-class _BandLabel extends StatelessWidget {
-  final String label; final Color color; final TextTheme t;
-  const _BandLabel(this.label, this.color, this.t);
-  @override
-  Widget build(BuildContext context) =>
-      Text(label, style: t.labelSmall?.copyWith(fontSize: 9, color: color));
-}
-
-List<Color> _buildPalette(Color base, int count) {
-  if (count == 0) return [];
-  final hsl = HSLColor.fromColor(base);
-  return List.generate(count, (i) => HSLColor.fromAHSL(
-    1.0,
-    (hsl.hue + i * (360.0 / count)) % 360.0,
-    hsl.saturation.clamp(0.45, 0.85),
-    hsl.lightness.clamp(0.38, 0.62),
-  ).toColor());
 }
 
 class _TagEntry {
