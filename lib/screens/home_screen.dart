@@ -1,7 +1,6 @@
 // lib/screens/home_screen.dart
 // ══════════════════════════════════════════════════════════════════════════
 //  Écran principal avec navigation bas de page.
-//  Les paramètres sont désormais dans des sous-pages dédiées.
 // ══════════════════════════════════════════════════════════════════════════
 
 import 'dart:async';
@@ -17,7 +16,7 @@ import '../services/image_service.dart';
 import '../services/update_service.dart';
 import '../services/data_cache.dart';
 import '../services/prefetch_service.dart';
-import '../services/all_scrobbles_service.dart'; // ← Nouveau
+import '../services/all_scrobbles_service.dart';
 
 // ── Sous-pages de paramètres ──────────────────────────────────────────────────
 import 'settings/appearance_page.dart';
@@ -86,12 +85,22 @@ class _HomeScreenState extends State<HomeScreen> {
     _service = LastFmService(apiKey: widget.apiKey, username: widget.username);
     localeNotifier.addListener(_onLocaleChange);
 
-    // Initialiser le cache puis lancer les préchargements en arrière-plan
+    // Initialiser le cache puis lancer les synchronisations en arrière-plan
     DataCache.init().then((_) {
       // 1. Données Dashboard / Rankings / Search (prefetch standard)
       PrefetchService.prefetchAll(_service);
-      // 2. Historique complet pour les graphiques (silencieux, paginé)
-      AllScrobblesService.loadAll(_service);
+
+      // 2. Historique des scrobbles :
+      //    • Première connexion (isFirstLoad) → chargement COMPLET depuis
+      //      l'année d'inscription jusqu'à aujourd'hui.
+      //    • Lancements suivants → synchronisation INCRÉMENTALE (seuls les
+      //      nouveaux scrobbles depuis le dernier timestamp connu).
+      //    Dans les deux cas, progressNotifier pilote l'indicateur UI du dashboard.
+      if (AllScrobblesService.isFirstLoad) {
+        AllScrobblesService.loadAll(_service);
+      } else {
+        AllScrobblesService.syncNew(_service);
+      }
     });
   }
 

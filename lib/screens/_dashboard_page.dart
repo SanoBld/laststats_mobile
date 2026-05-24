@@ -798,10 +798,24 @@ class _DashboardPageState extends State<_DashboardPage> {
           pinned: true,
           stretch: true,
           actions: [
-            IconButton(
-              icon: const Icon(Icons.refresh_rounded),
-              onPressed: _load,
-              tooltip: L.dashRefresh,
+            // ── Bouton refresh + indicateur sync scrobbles ───────────
+            ValueListenableBuilder<AllScrobblesProgress>(
+              valueListenable: AllScrobblesService.progressNotifier,
+              builder: (_, progress, __) {
+                final isSyncing = progress.isLoading;
+                return Row(mainAxisSize: MainAxisSize.min, children: [
+                  if (isSyncing)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 2),
+                      child: _SyncProgressChip(progress: progress),
+                    ),
+                  _SyncRefreshButton(
+                    isSyncing:  isSyncing,
+                    onPressed:  isSyncing ? null : _load,
+                    tooltip:    L.dashRefresh,
+                  ),
+                ]);
+              },
             ),
             IconButton(
               icon: const Icon(Icons.settings_outlined),
@@ -2453,6 +2467,131 @@ class _NowPlayingCard extends StatelessWidget {
                 style: text.bodySmall?.copyWith(
                     color: scheme.onSecondaryContainer.withValues(alpha: 0.7))),
           ])),
+        ]),
+      ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  _SyncRefreshButton — bouton refresh avec animation de rotation
+// ══════════════════════════════════════════════════════════════════════════
+
+class _SyncRefreshButton extends StatefulWidget {
+  final bool     isSyncing;
+  final VoidCallback? onPressed;
+  final String   tooltip;
+
+  const _SyncRefreshButton({
+    required this.isSyncing,
+    required this.tooltip,
+    this.onPressed,
+  });
+
+  @override
+  State<_SyncRefreshButton> createState() => _SyncRefreshButtonState();
+}
+
+class _SyncRefreshButtonState extends State<_SyncRefreshButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+    if (widget.isSyncing) _ctrl.repeat();
+  }
+
+  @override
+  void didUpdateWidget(_SyncRefreshButton old) {
+    super.didUpdateWidget(old);
+    if (widget.isSyncing && !_ctrl.isAnimating) {
+      _ctrl.repeat();
+    } else if (!widget.isSyncing && _ctrl.isAnimating) {
+      _ctrl.stop();
+      _ctrl.animateTo(0, duration: const Duration(milliseconds: 300));
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      icon: RotationTransition(
+        turns: _ctrl,
+        child: const Icon(Icons.refresh_rounded),
+      ),
+      onPressed: widget.onPressed,
+      tooltip: widget.tooltip,
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  _SyncProgressChip — indicateur discret de progression à côté du bouton
+// ══════════════════════════════════════════════════════════════════════════
+
+class _SyncProgressChip extends StatelessWidget {
+  final AllScrobblesProgress progress;
+  const _SyncProgressChip({required this.progress});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text   = Theme.of(context).textTheme;
+    final label  = progress.shortLabel;
+    final frac   = progress.fraction;
+
+    return AnimatedOpacity(
+      opacity: 1.0,
+      duration: const Duration(milliseconds: 300),
+      child: Container(
+        height: 26,
+        constraints: const BoxConstraints(minWidth: 52, maxWidth: 96),
+        decoration: BoxDecoration(
+          color:  scheme.surfaceContainerHighest.withValues(alpha: 0.85),
+          borderRadius: BorderRadius.circular(13),
+          border: Border.all(
+              color: scheme.outlineVariant.withValues(alpha: 0.5), width: 0.8),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(children: [
+          // Barre de progression en fond
+          if (frac > 0)
+            Positioned.fill(
+              child: FractionallySizedBox(
+                widthFactor: frac,
+                alignment: Alignment.centerLeft,
+                child: Container(
+                  color: scheme.primary.withValues(alpha: 0.15),
+                ),
+              ),
+            ),
+          // Texte
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Text(
+                label,
+                style: text.labelSmall?.copyWith(
+                  color:      scheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                  fontSize:   10,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
         ]),
       ),
     );
