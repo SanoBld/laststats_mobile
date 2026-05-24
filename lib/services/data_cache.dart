@@ -39,6 +39,7 @@ class DataCache {
 
   // Cache en mémoire (évite les lectures disque répétées)
   static final Map<String, _CacheEntry> _mem = {};
+  static bool _warmedUp = false;
 
   static SharedPreferences? _prefs;
 
@@ -55,6 +56,8 @@ class DataCache {
   /// Lit toutes les entrées non expirées depuis SharedPreferences
   /// et les charge en mémoire. À appeler une seule fois au démarrage.
   static Future<void> _warmUp() async {
+    if (_warmedUp) return;
+    _warmedUp = true;
     final p = _prefs!;
     for (final key in p.getKeys()) {
       if (!key.startsWith(_prefix)) continue;

@@ -10,6 +10,13 @@ List<String> get _chartWeekdayLabels => localeNotifier.value == 'en'
 const _kTwoPi  = 6.283185307179586;
 const _kHalfPi = 1.5707963267948966;
 
+/// Nombre exact pour les barres (jusqu'à 999 999, puis M).
+/// Contrairement à _fmt qui abrège dès 1 000.
+String _fmtExact(int n) {
+  if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
+  return n.toString();
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 class _ChartsPage extends StatefulWidget {
@@ -31,12 +38,13 @@ class _ChartsPageState extends State<_ChartsPage>
 
   // ── Données liées à l'année sélectionnée ─────────────────────────────────
   Map<String, int>? _monthly;
-  bool _hourlyLoading   = false;
+  bool _hourlyLoading    = false;
   Map<int, int>?    _hourlyData;
   Map<int, int>?    _weekdayData;
-  int  _hourlyCount     = 0;
-  bool _calendarLoading = false;
+  int  _hourlyCount      = 0;
+  bool _calendarLoading  = false;
   Map<String, int>? _calendarData;
+  bool _hasFullYearData  = false; // true = données depuis AllScrobblesService
 
   // ── Genres (dérivé des tops artistes, all-time) ───────────────────────────
   bool _tagsLoading = false;
@@ -81,8 +89,10 @@ class _ChartsPageState extends State<_ChartsPage>
     // Actualiser les années disponibles dès qu'une nouvelle est chargée
     _refreshAvailableYears();
 
-    // Si l'année sélectionnée vient d'être chargée, mettre à jour les graphiques
-    if (AllScrobblesService.isYearCached(_selectedYear) && _hourlyData == null) {
+    // Recharger dès que les données complètes de l'année arrivent,
+    // même si on avait déjà du contenu via le fallback (page 1 incomplet)
+    if (!_hasFullYearData && AllScrobblesService.isYearCached(_selectedYear)) {
+      _hasFullYearData = true;
       _loadYearData(_selectedYear);
     }
   }
@@ -107,6 +117,9 @@ class _ChartsPageState extends State<_ChartsPage>
 
       _refreshAvailableYears();
       _loadTags();
+
+      // Initialiser le flag avant de charger (évite un double-chargement inutile)
+      _hasFullYearData = AllScrobblesService.isYearCached(_selectedYear);
 
       // Charger les données de l'année sélectionnée
       await _loadYearData(_selectedYear);
@@ -300,11 +313,45 @@ class _ChartsPageState extends State<_ChartsPage>
     setState(() => _availableYears = sorted);
   }
 
+  // ── Helpers all-time ─────────────────────────────────────────────────────
+
+  /// Combine TOUS les timestamps disponibles en données mensuelles.
+  /// Retombe sur _monthly (fallback API) si aucune année n'est encore en cache.
+  Map<String, int> _buildAllTimeMonthly() {
+    final result = <String, int>{};
+    for (final year in _availableYears) {
+      final ts = AllScrobblesService.getTimestampsForYear(year);
+      if (ts != null) {
+        AllScrobblesService.computeMonthly(ts)
+            .forEach((k, v) => result[k] = (result[k] ?? 0) + v);
+      }
+    }
+    if (result.isEmpty && _monthly != null) result.addAll(_monthly!);
+    return result;
+  }
+
+  /// Cumulative all-time, coupée au mois courant (pas de mois futurs vides).
+  Map<String, int> _buildAllTimeCumulative(Map<String, int> monthly) {
+    final now    = DateTime.now();
+    final cutoff = '${now.year}-${now.month.toString().padLeft(2, '0')}';
+    final keys   = monthly.keys
+        .where((k) => k.compareTo(cutoff) <= 0)
+        .toList()..sort();
+    int cum = 0;
+    final result = <String, int>{};
+    for (final k in keys) {
+      cum += monthly[k]!;
+      result[k] = cum;
+    }
+    return result;
+  }
+
   void _onYearChanged(int year) {
     if (year == _selectedYear) return;
     setState(() {
       _selectedYear    = year;
-      _monthly         = null;
+      _hasFullYearData = AllScrobblesService.isYearCached(year);
+      // _monthly (fallback) n'est pas réinitialisé : il alimente _buildAllTimeMonthly
       _hourlyData      = null;
       _weekdayData     = null;
       _calendarData    = null;
@@ -478,24 +525,12 @@ class _ChartsPageState extends State<_ChartsPage>
     if (_loading)       return const Center(child: CircularProgressIndicator());
     if (_error != null) return _ErrorView(message: _error!, onRetry: _load);
 
-    final monthly    = _monthly ?? {};
-    final sortedKeys = monthly.keys.toList()..sort();
+    // ── Données all-time (barres + courbe) ───────────────────────────────────
+    final allTimeMonthly = _buildAllTimeMonthly();
+    final cumulData      = _buildAllTimeCumulative(allTimeMonthly);
 
-    // Données cumulées (depuis all-scrobbles si dispo, sinon depuis _monthly)
-    Map<String, int> cumulData = {};
-    final cachedTs = AllScrobblesService.getTimestampsForYear(_selectedYear);
-    if (cachedTs != null) {
-      cumulData = AllScrobblesService.computeYearCumulative(
-          cachedTs, _selectedYear);
-    } else {
-      int cum = 0;
-      for (final k in sortedKeys) {
-        cum += monthly[k]!;
-        cumulData[k] = cum;
-      }
-    }
-
-    // Source des données d'habitudes
+    // ── Source des habitudes d'écoute (année sélectionnée) ──────────────────
+    final cachedTs    = AllScrobblesService.getTimestampsForYear(_selectedYear);
     final hasFullData = cachedTs != null;
     final habitsSubtitle = hasFullData
         ? _ct(
@@ -549,24 +584,19 @@ class _ChartsPageState extends State<_ChartsPage>
           // ── Bannière chargement historique ────────────────────────────────
           _buildHistoryBanner(context),
 
-          // ── 1. Barres mensuelles ──────────────────────────────────────────
+          // ── 1. Barres mensuelles (all-time, scroll depuis le 1er scrobble) ──
           _SectionHeader(title: L.chartsMonthly, icon: Icons.calendar_month_rounded),
           const SizedBox(height: 12),
-          if (monthly.isNotEmpty) _MonthlyCard(monthly: monthly),
+          if (allTimeMonthly.isNotEmpty) _MonthlyCard(monthly: allTimeMonthly),
           const SizedBox(height: 24),
 
-          // ── 2. Courbe cumulative ──────────────────────────────────────────
+          // ── 2. Courbe cumulative (all-time, coupée au mois courant) ────────
           if (cumulData.length >= 2) ...[
             _SectionHeader(
-              title: hasFullData
-                  ? _ct(
-                      'Progression des scrobbles — $_selectedYear',
-                      'Scrobble progression — $_selectedYear',
-                    )
-                  : _ct(
-                      "Progression du total d'écoutes",
-                      'Cumulative scrobble progression',
-                    ),
+              title: _ct(
+                "Progression totale des scrobbles",
+                'All-time scrobble progression',
+              ),
               icon: Icons.trending_up_rounded,
             ),
             const SizedBox(height: 12),
@@ -831,7 +861,7 @@ class _MonthlyCardState extends State<_MonthlyCard> {
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
                           Text(
-                            ratio > 0.12 ? _fmt(e.value) : '',
+                            ratio > 0.12 ? _fmtExact(e.value) : '',
                             textAlign: TextAlign.center,
                             style: t.labelSmall?.copyWith(
                               fontSize: 8,
@@ -1739,11 +1769,12 @@ class _MonthHeatGrid extends StatelessWidget {
                     '${month.month.toString().padLeft(2, '0')}-'
                     '${day.toString().padLeft(2, '0')}';
                 final count = data[key] ?? 0;
-                final ratio = (maxVal > 0 && count > 0) ? count / maxVal : 0.0;
-                final color = count == 0
+                final ratio       = (maxVal > 0 && count > 0) ? count / maxVal : 0.0;
+                final scaledRatio = ratio > 0 ? sqrt(ratio).clamp(0.0, 1.0) : 0.0;
+                final color       = count == 0
                     ? s.surfaceContainerHigh
                     : Color.lerp(s.primaryContainer, s.primary,
-                                 ratio.clamp(0.0, 1.0) * 0.9)!;
+                                 (scaledRatio * 0.85 + 0.15).clamp(0.0, 1.0))!;
                 return Tooltip(
                   message: count > 0 ? '$day — $count scrobbles' : '',
                   child: Container(

@@ -5,6 +5,7 @@
 // ══════════════════════════════════════════════════════════════════════════
 
 import 'dart:async';
+import 'dart:math' show sqrt;
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:palette_generator/palette_generator.dart';
