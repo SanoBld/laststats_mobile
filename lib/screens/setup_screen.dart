@@ -790,7 +790,7 @@ class _FirstLoadScreenState extends State<_FirstLoadScreen>
 //  _FirstLoadChecklist — checklist animée des étapes d'import
 // ══════════════════════════════════════════════════════════════════════════
 
-class _FirstLoadChecklist extends StatelessWidget {
+class _FirstLoadChecklist extends StatefulWidget {
   final PrefetchState state;
   final ColorScheme   scheme;
   final TextTheme     text;
@@ -804,7 +804,42 @@ class _FirstLoadChecklist extends StatelessWidget {
   });
 
   @override
+  State<_FirstLoadChecklist> createState() => _FirstLoadChecklistState();
+}
+
+class _FirstLoadChecklistState extends State<_FirstLoadChecklist> {
+  final _sc = ScrollController();
+
+  @override
+  void didUpdateWidget(_FirstLoadChecklist old) {
+    super.didUpdateWidget(old);
+    // Auto-scroll vers le bas à chaque nouvelle étape
+    if (widget.state.completedSteps.length != old.state.completedSteps.length ||
+        widget.state.currentStep != old.state.currentStep) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_sc.hasClients) {
+          _sc.animateTo(
+            _sc.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 280),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _sc.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final state      = widget.state;
+    final scheme     = widget.scheme;
+    final text       = widget.text;
+    final t          = widget.t;
     final hasContent = state.completedSteps.isNotEmpty ||
         state.currentStep.isNotEmpty;
 
@@ -821,59 +856,68 @@ class _FirstLoadChecklist extends StatelessWidget {
             color: scheme.outlineVariant.withValues(alpha: 0.55)),
       ),
       child: hasContent
-          ? SingleChildScrollView(
-              physics: const NeverScrollableScrollPhysics(),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // En-tête
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: Text(
-                      t('Import de tes données', 'Importing your data'),
-                      style: text.labelMedium?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.3,
-                      ),
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // ── En-tête fixe ───────────────────────────────────────────
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Text(
+                    t('Import de tes données', 'Importing your data'),
+                    style: text.labelMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.3,
                     ),
                   ),
+                ),
 
-                  // Étapes complètes
-                  ...state.completedSteps.map((label) => _StepRow(
-                    label:  label,
-                    status: _RowStatus.done,
-                    scheme: scheme,
-                    text:   text,
-                  )),
+                // ── Liste scrollable des étapes ────────────────────────────
+                Flexible(
+                  child: ListView(
+                    controller: _sc,
+                    shrinkWrap: true,
+                    physics: const BouncingScrollPhysics(),
+                    padding: EdgeInsets.zero,
+                    children: [
+                      // Étapes complètes
+                      ...state.completedSteps.map((label) => _StepRow(
+                        label:  label,
+                        status: _RowStatus.done,
+                        scheme: scheme,
+                        text:   text,
+                      )),
 
-                  // Étape active
-                  if (state.currentStep.isNotEmpty && !state.isComplete)
-                    _StepRow(
-                      label:  state.currentStep,
-                      status: _RowStatus.active,
-                      scheme: scheme,
-                      text:   text,
-                    ),
-
-                  // Message final
-                  if (state.isComplete)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Row(children: [
-                        Icon(Icons.rocket_launch_rounded,
-                            size: 15, color: scheme.primary),
-                        const SizedBox(width: 8),
-                        Text(
-                          t('Importé !', 'Imported!'),
-                          style: text.bodySmall?.copyWith(
-                              color: scheme.primary,
-                              fontWeight: FontWeight.w700),
+                      // Étape active
+                      if (state.currentStep.isNotEmpty && !state.isComplete)
+                        _StepRow(
+                          label:  state.currentStep,
+                          status: _RowStatus.active,
+                          scheme: scheme,
+                          text:   text,
                         ),
-                      ]),
-                    ),
-                ],
-              ),
+
+                      // Message final
+                      if (state.isComplete)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Row(children: [
+                            Icon(Icons.rocket_launch_rounded,
+                                size: 15, color: scheme.primary),
+                            const SizedBox(width: 8),
+                            Text(
+                              t('Importé !', 'Imported!'),
+                              style: text.bodySmall?.copyWith(
+                                  color: scheme.primary,
+                                  fontWeight: FontWeight.w700),
+                            ),
+                          ]),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
             )
           // Placeholder avant la 1ère étape
           : Row(children: [

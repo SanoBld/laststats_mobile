@@ -365,44 +365,45 @@ class _ChartsPageState extends State<_ChartsPage>
   //  Widgets de navigation
   // ══════════════════════════════════════════════════════════════════════════
 
-  Widget _buildYearSelector(ColorScheme s, TextTheme t) {
-    final canPrev = _availableYears.indexOf(_selectedYear) > 0;
-    final canNext = _availableYears.indexOf(_selectedYear) < _availableYears.length - 1;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: s.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: s.outlineVariant.withValues(alpha: 0.5)),
+  Widget _buildYearChips(ColorScheme s, TextTheme t) {
+    final years = _availableYears.isNotEmpty ? _availableYears : [_selectedYear];
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      physics: const BouncingScrollPhysics(),
+      child: Row(
+        children: years.map((year) {
+          final selected = year == _selectedYear;
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: GestureDetector(
+              onTap: () => _onYearChanged(year),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? s.primaryContainer.withValues(alpha: 0.6)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: selected
+                        ? s.primary.withValues(alpha: 0.5)
+                        : s.outlineVariant,
+                    width: 1,
+                  ),
+                ),
+                child: Text(
+                  '$year',
+                  style: t.labelMedium?.copyWith(
+                    color: selected ? s.onPrimaryContainer : s.onSurfaceVariant,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        IconButton(
-          icon: const Icon(Icons.chevron_left_rounded),
-          iconSize: 20,
-          visualDensity: VisualDensity.compact,
-          color: canPrev ? s.primary : s.onSurfaceVariant.withValues(alpha: 0.3),
-          onPressed: canPrev
-              ? () => _onYearChanged(
-                  _availableYears[_availableYears.indexOf(_selectedYear) - 1])
-              : null,
-        ),
-        Text(
-          '$_selectedYear',
-          style: t.titleSmall?.copyWith(
-              fontWeight: FontWeight.w800, color: s.onSurface),
-        ),
-        IconButton(
-          icon: const Icon(Icons.chevron_right_rounded),
-          iconSize: 20,
-          visualDensity: VisualDensity.compact,
-          color: canNext ? s.primary : s.onSurfaceVariant.withValues(alpha: 0.3),
-          onPressed: canNext
-              ? () => _onYearChanged(
-                  _availableYears[_availableYears.indexOf(_selectedYear) + 1])
-              : null,
-        ),
-      ]),
     );
   }
 
@@ -548,42 +549,33 @@ class _ChartsPageState extends State<_ChartsPage>
               );
 
     return SafeArea(
-      child: RefreshIndicator(
-      onRefresh: _load,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 40),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SizedBox(height: 16),
 
-          // ── En-tête ───────────────────────────────────────────────────────
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(L.chartsTitle,
-                        style: text.headlineSmall
-                            ?.copyWith(fontWeight: FontWeight.w800)),
-                    const SizedBox(height: 2),
-                    Text(
-                      _ct('Vos écoutes en images — tendances et évolutions',
-                          'Your scrobbles visualised — trends and evolutions'),
-                      style: text.bodySmall
-                          ?.copyWith(color: scheme.onSurfaceVariant),
-                    ),
-                  ],
-                ),
-              ),
-              if (_availableYears.length > 1)
-                _buildYearSelector(scheme, text),
-            ],
+          // ── Header fixe ───────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 0, 0),
+            child: Text(L.chartsTitle,
+                style: text.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
+          ),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.only(left: 16),
+            child: _buildYearChips(scheme, text),
           ),
           const SizedBox(height: 14),
 
-          // ── Bannière chargement historique ────────────────────────────────
-          _buildHistoryBanner(context),
+          // ── Contenu scrollable ────────────────────────────────────────────
+          Expanded(
+            child: RefreshIndicator(
+            onRefresh: _load,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 40),
+              children: [
+
+                // ── Bannière chargement historique ──────────────────────────
+                _buildHistoryBanner(context),
 
           // ── 1. Barres mensuelles (all-time, scroll depuis le 1er scrobble) ──
           _SectionHeader(title: L.chartsMonthly, icon: Icons.calendar_month_rounded),
@@ -720,7 +712,10 @@ class _ChartsPageState extends State<_ChartsPage>
           const SizedBox(height: 20),
         ],
       ),
-    ),
+      ),
+      ),
+        ],
+      ),
     );
   }
 }
