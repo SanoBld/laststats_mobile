@@ -801,7 +801,7 @@ class _DashboardPageState extends State<_DashboardPage> {
             // ── Bouton refresh + indicateur sync scrobbles ───────────
             ValueListenableBuilder<AllScrobblesProgress>(
               valueListenable: AllScrobblesService.progressNotifier,
-              builder: (_, progress, __) {
+              builder: (_, progress, _) {
                 final isSyncing = progress.isLoading;
                 return Row(mainAxisSize: MainAxisSize.min, children: [
                   if (isSyncing)
@@ -1161,9 +1161,10 @@ class _HorizontalCarousel extends StatelessWidget {
   }
 }
 
-// ── Carte individuelle du carousel ────────────────────────────────────────────
+// ── Individual card in the horizontal carousel ────────────────────────────────
+// StatefulWidget so we can track the pressed state for a scale-down feedback.
 
-class _CarouselCard extends StatelessWidget {
+class _CarouselCard extends StatefulWidget {
   final double  width, height;
   final String  name, sub, plays, rank;
   final String? initialUrl;
@@ -1183,23 +1184,38 @@ class _CarouselCard extends StatelessWidget {
   });
 
   @override
+  State<_CarouselCard> createState() => _CarouselCardState();
+}
+
+class _CarouselCardState extends State<_CarouselCard> {
+  bool _pressed = false;
+
+  @override
   Widget build(BuildContext context) {
-    final text   = Theme.of(context).textTheme;
+    final text = Theme.of(context).textTheme;
 
     return GestureDetector(
-      onTap: onTap,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: SizedBox(
-          width: width, height: height,
-          child: Stack(fit: StackFit.expand, children: [
+      onTap:       widget.onTap,
+      onTapDown:   (_) => setState(() => _pressed = true),
+      onTapUp:     (_) => setState(() => _pressed = false),
+      onTapCancel: ()  => setState(() => _pressed = false),
+      child: AnimatedScale(
+        // Subtle press-down feedback
+        scale:    _pressed ? 0.96 : 1.0,
+        duration: const Duration(milliseconds: 120),
+        curve:    Curves.easeOut,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: SizedBox(
+            width: widget.width, height: widget.height,
+            child: Stack(fit: StackFit.expand, children: [
 
-            // ── Image de fond (full bleed) ────────────────────────────
+            // ── Background image (full bleed) ────────────────────────────
             _CarouselImage(
-              initialUrl: initialUrl,
-              resolver:   () => imageFuture,
-              width:  width,
-              height: height,
+              initialUrl: widget.initialUrl,
+              resolver:   () => widget.imageFuture,
+              width:  widget.width,
+              height: widget.height,
             ),
 
             // ── Dégradé bas → opaque ─────────────────────────────────
@@ -1226,7 +1242,7 @@ class _CarouselCard extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    name,
+                    widget.name,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: text.bodyMedium?.copyWith(
@@ -1239,10 +1255,10 @@ class _CarouselCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  if (sub.isNotEmpty) ...[
+                  if (widget.sub.isNotEmpty) ...[
                     const SizedBox(height: 2),
                     Text(
-                      sub,
+                      widget.sub,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: text.bodySmall?.copyWith(
@@ -1263,13 +1279,13 @@ class _CarouselCard extends StatelessWidget {
                             color: Colors.white.withValues(alpha: 0.25), width: 0.8),
                       ),
                       child: Text(
-                        '$plays ${L.commonPlays}',
+                        '${widget.plays} ${L.commonPlays}',
                         style: text.labelSmall?.copyWith(
                             color: Colors.white, fontWeight: FontWeight.w600),
                       ),
                     ),
                     const Spacer(),
-                    // Numéro de rang
+                    // Rank badge
                     Container(
                       width: 26, height: 26,
                       decoration: BoxDecoration(
@@ -1280,7 +1296,7 @@ class _CarouselCard extends StatelessWidget {
                       ),
                       child: Center(
                         child: Text(
-                          rank,
+                          widget.rank,
                           style: text.labelSmall?.copyWith(
                               color: Colors.white, fontWeight: FontWeight.w800),
                         ),
@@ -1293,11 +1309,12 @@ class _CarouselCard extends StatelessWidget {
           ]),
         ),
       ),
-    );
+    ),  // AnimatedScale
+  );
   }
 }
 
-// ── Image plein-cadre pour le carousel ───────────────────────────────────────
+// ── Full-bleed background image for carousel cards ────────────────────────────
 
 class _CarouselImage extends StatelessWidget {
   final String? initialUrl;
@@ -1460,7 +1477,8 @@ class _FriendCard extends StatefulWidget {
 
 class _FriendCardState extends State<_FriendCard> {
   static const _ph = '2a96cbd8b46e442fc41c2b86b821562f';
-  String _bgUrl = '';
+  String _bgUrl   = '';
+  bool   _pressed = false;   // tracks tap-down for scale feedback
 
   _FriendData  get friend      => widget.friend;
   bool         get isFav       => widget.isFav;
@@ -1500,7 +1518,14 @@ class _FriendCardState extends State<_FriendCard> {
         : friend.lastArtist;
 
     return GestureDetector(
-      onTap: () => _openProfile(context),
+      onTap:       () => _openProfile(context),
+      onTapDown:   (_) => setState(() => _pressed = true),
+      onTapUp:     (_) => setState(() => _pressed = false),
+      onTapCancel: ()  => setState(() => _pressed = false),
+      child: AnimatedScale(
+        scale:    _pressed ? 0.95 : 1.0,
+        duration: const Duration(milliseconds: 130),
+        curve:    Curves.easeOut,
       child: Container(
         width: 116,
         margin: const EdgeInsets.only(right: 10),
@@ -1657,6 +1682,7 @@ class _FriendCardState extends State<_FriendCard> {
           ]),
         ),
       ),
+      ), // AnimatedScale
     );
   }
 
@@ -2408,9 +2434,19 @@ class _DashStatCard extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(emoji, style: const TextStyle(fontSize: 22)),
           const SizedBox(height: 6),
-          Text(value, maxLines: 2, overflow: TextOverflow.ellipsis,
+          // Cross-fades when the value changes on a silent background refresh
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 300),
+            transitionBuilder: (c, a) => FadeTransition(opacity: a, child: c),
+            child: Text(
+              value,
+              key: ValueKey(value),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: text.bodyLarge?.copyWith(
-                  fontWeight: FontWeight.w800, color: scheme.onSurface)),
+                  fontWeight: FontWeight.w800, color: scheme.onSurface),
+            ),
+          ),
           Text(label, style: text.bodySmall?.copyWith(
               color: scheme.primary, fontWeight: FontWeight.w600)),
           if (sub != null)
@@ -2454,8 +2490,8 @@ class _NowPlayingCard extends StatelessWidget {
           const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
-              Container(width: 7, height: 7,
-                  decoration: BoxDecoration(color: scheme.secondary, shape: BoxShape.circle)),
+              // Animated pulsing dot — signals live playback
+              _PulsingDot(color: scheme.secondary, size: 7),
               const SizedBox(width: 6),
               Text(L.commonNowPlayingBadge, style: text.labelSmall?.copyWith(
                   color: scheme.secondary, fontWeight: FontWeight.w700, letterSpacing: 1.1)),

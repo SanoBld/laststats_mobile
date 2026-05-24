@@ -178,11 +178,15 @@ class _TopListBodyState extends State<_TopListBody>
             return InkWell(
               onTap: () => _showDetail(ctx, item),
               borderRadius: BorderRadius.circular(8),
-              child: _ItemTile(
+              child: _FadeSlideIn(
+                // Stagger each item slightly for a cascade effect
+                delay: Duration(milliseconds: (idx * 25).clamp(0, 250)),
+                child: _ItemTile(
                 name: name, imageUrl: raw, imageFuture: imgF, rank: '${idx + 1}',
                 sub:   widget.type != 'artists' ? '$artist · $plays ${L.commonPlays}' : '$plays ${L.commonPlays}',
                 plays: widget.type != 'artists' ? plays : null,
               ),
+              ), // _FadeSlideIn
             );
           },
           childCount: (_items.length >= 3 ? _items.length - 3 : _items.length) + 1,
@@ -249,40 +253,46 @@ class _PodiumWidget extends StatelessWidget {
                 const SizedBox(height: 5),
                 Text(medals[col], style: TextStyle(fontSize: di == 0 ? 22 : 18)),
                 const SizedBox(height: 3),
-                Container(
-                  width: double.infinity,
-                  height: heights[col],
-                  decoration: BoxDecoration(
-                    color: podC,
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-                    border: Border(
-                      top:   BorderSide(color: podOn.withValues(alpha: 0.15), width: 1),
-                      left:  BorderSide(color: podOn.withValues(alpha: 0.15), width: 1),
-                      right: BorderSide(color: podOn.withValues(alpha: 0.15), width: 1),
-                    ),
-                  ),
-                  padding: const EdgeInsets.all(7),
-                  child: Column(children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
-                      decoration: BoxDecoration(
-                        color: podOn.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(20),
+                // Bar grows up from 0 on first render
+                TweenAnimationBuilder<double>(
+                  tween:    Tween(begin: 0.0, end: heights[col]),
+                  duration: Duration(milliseconds: 550 + col * 80),
+                  curve:    Curves.easeOutCubic,
+                  builder: (_, h, child) => SizedBox(height: h, child: child),
+                  child: Container(
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: podC,
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                      border: Border(
+                        top:   BorderSide(color: podOn.withValues(alpha: 0.15), width: 1),
+                        left:  BorderSide(color: podOn.withValues(alpha: 0.15), width: 1),
+                        right: BorderSide(color: podOn.withValues(alpha: 0.15), width: 1),
                       ),
-                      child: Text('#${di + 1}', style: text.labelSmall?.copyWith(
-                          color: podOn, fontWeight: FontWeight.w800)),
                     ),
-                    const SizedBox(height: 3),
-                    Text(name, maxLines: 2, overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.center,
-                        style: text.bodySmall?.copyWith(
-                            color: podOn, fontWeight: FontWeight.w700, fontSize: di == 0 ? 11 : 10)),
-                    if (heights[col] >= 100) ...[
-                      const SizedBox(height: 2),
-                      Text(plays, style: text.bodySmall
-                          ?.copyWith(color: podOn.withValues(alpha: 0.65), fontSize: 9)),
-                    ],
-                  ]),
+                    padding: const EdgeInsets.all(7),
+                    child: Column(children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: podOn.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text('#${di + 1}', style: text.labelSmall?.copyWith(
+                            color: podOn, fontWeight: FontWeight.w800)),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(name, maxLines: 2, overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: text.bodySmall?.copyWith(
+                              color: podOn, fontWeight: FontWeight.w700, fontSize: di == 0 ? 11 : 10)),
+                      if (heights[col] >= 100) ...[
+                        const SizedBox(height: 2),
+                        Text(plays, style: text.bodySmall
+                            ?.copyWith(color: podOn.withValues(alpha: 0.65), fontSize: 9)),
+                      ],
+                    ]),
+                  ),
                 ),
               ]),
             ));

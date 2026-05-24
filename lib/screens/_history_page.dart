@@ -143,8 +143,16 @@ class _HistoryPageState extends State<_HistoryPage>
                       border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.4)),
                     ),
                     child: Row(children: [
-                      Expanded(child: Text(_dateFmt(),
-                          style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w500))),
+                    // Cross-fades when the user navigates to a different day
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 220),
+                      transitionBuilder: (c, a) => FadeTransition(opacity: a, child: c),
+                      child: Text(
+                        _dateFmt(),
+                        key: ValueKey(_dateFmt()),
+                        style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
+                      ),
+                    ),
                       Icon(Icons.calendar_month_rounded, size: 16, color: scheme.onSurfaceVariant),
                     ]),
                   ),
@@ -346,8 +354,11 @@ class _HistChronView extends StatelessWidget {
                     color: scheme.onSurfaceVariant, fontStyle: FontStyle.italic)),
               ]),
             ),
-            for (final t in hTracks)
-              _HistTrackRow(track: t as Map, time: _localTimeString(t), service: service),
+            for (final (i, t) in hTracks.indexed)
+              _FadeSlideIn(
+                delay: Duration(milliseconds: (i * 20).clamp(0, 200)),
+                child: _HistTrackRow(track: t as Map, time: _localTimeString(t), service: service),
+              ),
             const SizedBox(height: 6),
           ]);
         },
@@ -517,11 +528,17 @@ class _HistStatSection extends StatelessWidget {
             const SizedBox(height: 4),
             ClipRRect(
               borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: max > 0 ? e.value / max : 0,
-                minHeight: 4,
-                backgroundColor: scheme.surfaceContainerHighest,
-                valueColor: AlwaysStoppedAnimation(scheme.primary),
+              // Bar animates from 0 to its value on first render
+              child: TweenAnimationBuilder<double>(
+                tween:    Tween(begin: 0.0, end: max > 0 ? e.value / max : 0),
+                duration: const Duration(milliseconds: 500),
+                curve:    Curves.easeOutCubic,
+                builder: (_, v, __) => LinearProgressIndicator(
+                  value:           v,
+                  minHeight:       4,
+                  backgroundColor: scheme.surfaceContainerHighest,
+                  valueColor:      AlwaysStoppedAnimation(scheme.primary),
+                ),
               ),
             ),
           ])),

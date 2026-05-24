@@ -1,6 +1,105 @@
 // ignore_for_file: unused_import
 part of 'home_screen.dart';
 
+// ── Reusable entrance animation: fade + subtle upward slide ──────────────────
+// Wrap any list item with this to get a gentle slide-in on first render.
+class _FadeSlideIn extends StatefulWidget {
+  final Widget child;
+  final Duration delay;
+  final Duration duration;
+  const _FadeSlideIn({
+    required this.child,
+    this.delay    = Duration.zero,
+    this.duration = const Duration(milliseconds: 350),
+  });
+
+  @override
+  State<_FadeSlideIn> createState() => _FadeSlideInState();
+}
+
+class _FadeSlideInState extends State<_FadeSlideIn>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double>   _fade;
+  late final Animation<Offset>   _slide;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl  = AnimationController(vsync: this, duration: widget.duration);
+    _fade  = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+    _slide = Tween<Offset>(
+      begin: const Offset(0, 0.06),
+      end:   Offset.zero,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+
+    if (widget.delay == Duration.zero) {
+      _ctrl.forward();
+    } else {
+      Future.delayed(widget.delay, () { if (mounted) _ctrl.forward(); });
+    }
+  }
+
+  @override
+  void dispose() { _ctrl.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) => FadeTransition(
+    opacity: _fade,
+    child:   SlideTransition(position: _slide, child: widget.child),
+  );
+}
+
+// ── Pulsing status dot (used in NowPlayingCard and friend cards) ──────────────
+class _PulsingDot extends StatefulWidget {
+  final Color color;
+  final double size;
+  const _PulsingDot({required this.color, this.size = 7});
+
+  @override
+  State<_PulsingDot> createState() => _PulsingDotState();
+}
+
+class _PulsingDotState extends State<_PulsingDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double>   _scale;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl  = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 900))
+      ..repeat(reverse: true);
+    _scale = Tween<double>(begin: 0.75, end: 1.25)
+        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
+  }
+
+  @override
+  void dispose() { _ctrl.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) => ScaleTransition(
+    scale: _scale,
+    child: Container(
+      width:  widget.size,
+      height: widget.size,
+      decoration: BoxDecoration(
+        color: widget.color,
+        shape: BoxShape.circle,
+        // Soft outer glow that breathes with the scale
+        boxShadow: [
+          BoxShadow(
+            color:      widget.color.withValues(alpha: 0.55),
+            blurRadius: 5,
+            spreadRadius: 1,
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
 /// Widget d'image intelligent avec résolution asynchrone.
 /// Converti en StatefulWidget pour mémoriser le Future de résolution :
 /// le resolver n'est appelé qu'une seule fois (ou si l'URL source change),
@@ -59,7 +158,7 @@ class _SmartImageState extends State<_SmartImage> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
-    // URL directement disponible — pas de FutureBuilder
+    // URL already available — skip FutureBuilder entirely
     if (_resolvedUrl != null && _resolvedUrl!.isNotEmpty) {
       return _img(_resolvedUrl!, scheme);
     }
@@ -70,14 +169,26 @@ class _SmartImageState extends State<_SmartImage> {
     return FutureBuilder<String>(
       future: _future,
       builder: (_, snap) {
-        if (snap.connectionState != ConnectionState.done) return _loading(scheme);
-        final url = snap.data ?? '';
-        // Mémoriser le résultat pour éviter les rebuilds futurs
-        if (url.isNotEmpty && _resolvedUrl == null) {
-          // Pas de setState ici pour ne pas causer un rebuild supplémentaire
-          _resolvedUrl = url;
+        final Widget child;
+        if (snap.connectionState != ConnectionState.done) {
+          child = _loading(scheme);
+        } else {
+          final url = snap.data ?? '';
+          // Persist result so future rebuilds skip the FutureBuilder
+          if (url.isNotEmpty && _resolvedUrl == null) _resolvedUrl = url;
+          child = url.isEmpty ? _fallback(scheme) : _img(url, scheme);
         }
-        return url.isEmpty ? _fallback(scheme) : _img(url, scheme);
+        // Smooth fade between the loading placeholder and the resolved image
+        return AnimatedSwitcher(
+          duration: const Duration(milliseconds: 280),
+          transitionBuilder: (c, a) => FadeTransition(opacity: a, child: c),
+          child: KeyedSubtree(
+            key: ValueKey(snap.connectionState == ConnectionState.done
+                ? (snap.data ?? 'fallback')
+                : 'loading'),
+            child: child,
+          ),
+        );
       },
     );
   }
