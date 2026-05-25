@@ -110,8 +110,8 @@ class _ChartsPageState extends State<_ChartsPage>
       ]);
       if (!mounted) return;
       setState(() {
-        _topArtists = res[0] as List<dynamic>;
-        _topAlbums  = res[1] as List<dynamic>;
+        _topArtists = res[0];
+        _topAlbums  = res[1];
         _loading    = false;
       });
 
@@ -142,15 +142,15 @@ class _ChartsPageState extends State<_ChartsPage>
 
   Future<void> _loadYearData(int year) async {
     // Priorité 1 : cache AllScrobbles (instantané)
-    final timestamps = AllScrobblesService.getTimestampsForYear(year);
-    if (timestamps != null) {
+    final records = AllScrobblesService.getRecordsForYear(year);
+    if (records != null) {
       if (!mounted) return;
       setState(() {
-        _monthly      = AllScrobblesService.computeMonthly(timestamps);
-        _hourlyData   = AllScrobblesService.computeHourly(timestamps);
-        _weekdayData  = AllScrobblesService.computeWeekday(timestamps);
-        _hourlyCount  = timestamps.length;
-        _calendarData = AllScrobblesService.computeCalendar(timestamps);
+        _monthly      = AllScrobblesService.computeMonthly(records);
+        _hourlyData   = AllScrobblesService.computeHourly(records);
+        _weekdayData  = AllScrobblesService.computeWeekday(records);
+        _hourlyCount  = records.length;
+        _calendarData = AllScrobblesService.computeCalendar(records);
         _hourlyLoading   = false;
         _calendarLoading = false;
       });
@@ -320,7 +320,7 @@ class _ChartsPageState extends State<_ChartsPage>
   Map<String, int> _buildAllTimeMonthly() {
     final result = <String, int>{};
     for (final year in _availableYears) {
-      final ts = AllScrobblesService.getTimestampsForYear(year);
+      final ts = AllScrobblesService.getRecordsForYear(year);
       if (ts != null) {
         AllScrobblesService.computeMonthly(ts)
             .forEach((k, v) => result[k] = (result[k] ?? 0) + v);

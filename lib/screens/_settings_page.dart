@@ -126,6 +126,16 @@ class _SettingsPageState extends State<_SettingsPage> {
       pageBuilder: (u) => AccountPage(username: u),
     ),
     _SettingsCardData(
+      icon: Icons.storage_rounded,
+      iconBgColor: (s) => Color.lerp(s.primaryContainer, s.tertiaryContainer, 0.5)!,
+      iconFgColor: (s) => s.onPrimaryContainer,
+      title:    () => localeNotifier.value == 'en' ? 'Cache' : 'Cache',
+      subtitle: () => localeNotifier.value == 'en'
+          ? 'History, images, API data'
+          : 'Historique, images, données API',
+      pageBuilder: (_) => const CachePage(),
+    ),
+    _SettingsCardData(
       icon: Icons.backup_rounded,
       iconBgColor: (s) => s.secondaryContainer,
       iconFgColor: (s) => s.onSecondaryContainer,

@@ -25,6 +25,7 @@ import 'settings/startup_page.dart';
 import 'settings/language_page.dart';
 import 'settings/account_page.dart';
 import 'settings/backup_page.dart';
+import 'settings/cache_page.dart';
 import 'settings/updates_page.dart';
 import 'settings/about_page.dart';
 

@@ -6,12 +6,10 @@
 //    • 1ère connexion  : loadAll()  — pagine toutes les années depuis
 //      l'inscription (200 tracks/page, délai 200 ms entre pages).
 //    • Lancements suiv.: syncNew()  — ne récupère que les scrobbles
-//      postérieurs au dernier timestamp connu (beaucoup plus rapide).
-//    • Stocke uniquement les timestamps Unix (int) — très compact.
-//    • Clés cache :
-//        allscrobbles_cur_YYYY  → année en cours (TTL 1 h)
-//        allscrobbles_YYYY      → années passées  (TTL 90 j)
-//        allscrobbles_meta      → années chargées (TTL 24 h)
+//      postérieurs au dernier timestamp connu (très rapide).
+//    • Stocke les records complets : ts + track + artist + album.
+//    • Si une année est en cache v1 (timestamps seulement), elle est
+//      marquée incomplète et rechargée à la prochaine occasion.
 //    • progressNotifier mis à jour en temps réel pour l'UI.
 // ══════════════════════════════════════════════════════════════════════════
 
@@ -40,7 +38,7 @@ class AllScrobblesProgress {
   final int      totalYears;
   final int      loaded;
   final int      total;
-  final int      newCount;    // Nombre de nouveaux scrobbles (sync incrémentale)
+  final int      newCount;
 
   const AllScrobblesProgress({
     this.isLoading  = false,
@@ -59,27 +57,25 @@ class AllScrobblesProgress {
 
   factory AllScrobblesProgress.done({
     int totalYears = 0,
-    int newCount = 0,
-    SyncMode mode = SyncMode.full,
+    int newCount   = 0,
+    SyncMode mode  = SyncMode.full,
   }) => AllScrobblesProgress(
     isDone: true, isIdle: false,
     totalYears: totalYears,
-    newCount: newCount,
-    mode: mode,
+    newCount:   newCount,
+    mode:       mode,
   );
 
-  /// Progression globale [0.0 – 1.0].
   double get fraction {
     if (mode == SyncMode.incremental) {
       return total > 0 ? (loaded / total).clamp(0.0, 1.0) : 0.0;
     }
     if (totalYears == 0) return 0.0;
-    final yearsDone = yearIndex.toDouble();
-    final yearInner = (total > 0) ? (loaded / total) : 0.0;
+    final yearsDone  = yearIndex.toDouble();
+    final yearInner  = total > 0 ? (loaded / total) : 0.0;
     return ((yearsDone + yearInner) / totalYears).clamp(0.0, 1.0);
   }
 
-  /// Texte court pour l'UI (ex: "1 234 / 5 000" ou "42 nouveaux").
   String get shortLabel {
     if (mode == SyncMode.incremental) {
       if (total > 0) return '$loaded / $total';
@@ -104,8 +100,6 @@ class AllScrobblesService {
   static bool _running = false;
   static bool get isRunning => _running;
 
-  /// Verrou de concurrence : empêche deux appels simultanés à loadYear()
-  /// pour la même année (évite de doubler les requêtes API).
   static final Set<int> _yearsInLoading = {};
 
   static final progressNotifier =
@@ -113,37 +107,29 @@ class AllScrobblesService {
 
   // ── Lectures publiques ────────────────────────────────────────────────────
 
-  /// `true` si aucun chargement n'a jamais été fait (première connexion).
   static bool get isFirstLoad => ScrobblesFileCache.getMeta() == null;
 
-  /// `true` si les données de [year] sont en cache et non expirées.
-  static bool isYearCached(int year) =>
-      ScrobblesFileCache.isYearCached(year);
+  static bool isYearCached(int year)   => ScrobblesFileCache.isYearCached(year);
+  static bool isYearComplete(int year) => ScrobblesFileCache.isYearComplete(year);
 
-  /// Timestamps Unix (secondes) pour [year], ou null si absent du cache.
+  /// Records complets pour [year] (avec track + artist + album).
+  static List<ScrobbleRecord>? getRecordsForYear(int year) =>
+      ScrobblesFileCache.getRecords(year);
+
+  /// Timestamps uniquement (rétrocompat).
   static List<int>? getTimestampsForYear(int year) =>
       ScrobblesFileCache.getTimestamps(year);
 
-  /// Années dont les données sont en cache.
-  static List<int> getCachedYears() {
-    final meta = ScrobblesFileCache.getMeta();
-    if (meta != null) {
-      final years = (meta['loaded_years'] as List?)
-          ?.map((e) => (e as num).toInt())
-          .toList() ?? [];
-      return years..sort();
-    }
-    return [];
-  }
+  static List<int> getCachedYears() => ScrobblesFileCache.getCachedYears();
 
-  /// Dernier timestamp Unix connu dans le cache (toutes années confondues).
-  /// Retourne 0 si aucune donnée en cache.
+  static int getTotalCachedScrobbles() =>
+      ScrobblesFileCache.getTotalScrobbleCount();
+
   static int get lastCachedTimestamp {
     int latest = 0;
     for (final year in getCachedYears()) {
       final ts = getTimestampsForYear(year);
       if (ts != null && ts.isNotEmpty) {
-        // Les timestamps sont triés croissant → le dernier est le plus récent
         final yearMax = ts.last;
         if (yearMax > latest) latest = yearMax;
       }
@@ -151,8 +137,6 @@ class AllScrobblesService {
     return latest;
   }
 
-  /// Année d'inscription extraite du cache userInfo.
-  /// Retourne (annéeActuelle − 3) si indisponible.
   static int getRegistrationYear() {
     final info = DataCache.getSync(DataCache.keyUserInfo());
     if (info is Map) {
@@ -173,17 +157,20 @@ class AllScrobblesService {
 
   // ── Chargement d'une année ────────────────────────────────────────────────
 
-  static Future<List<int>> loadYear(
+  /// Charge (ou recharge) une année entière depuis l'API Last.fm.
+  /// Stocke les records complets (ts + track + artist + album).
+  static Future<List<ScrobbleRecord>> loadYear(
     int year,
     LastFmService service, {
     bool force = false,
     void Function(int loaded, int total)? onProgress,
   }) async {
-    if (!force && isYearCached(year)) {
-      return getTimestampsForYear(year) ?? [];
+    // Déjà en cache complet et non forcé → retourner le cache
+    if (!force && isYearCached(year) && isYearComplete(year)) {
+      return getRecordsForYear(year) ?? [];
     }
 
-    // ── Verrou de concurrence : évite les doubles-requêtes ─────────────────
+    // Verrou de concurrence
     if (_yearsInLoading.contains(year)) return [];
     _yearsInLoading.add(year);
 
@@ -192,7 +179,7 @@ class AllScrobblesService {
     final from      = DateTime(year, 1, 1);
     final to        = isCurrent ? now : DateTime(year + 1, 1, 1);
 
-    final timestamps = <int>[];
+    final records = <ScrobbleRecord>[];
     int page       = 1;
     int totalPages = 1;
 
@@ -212,11 +199,12 @@ class AllScrobblesService {
                 attr['totalPages']?.toString() ?? '1') ?? 1;
             final ttl = int.tryParse(
                 attr['total']?.toString() ?? '0') ?? 0;
-            onProgress?.call(timestamps.length, ttl);
+            onProgress?.call(records.length, ttl);
           }
 
           final raw  = data['track'];
           final list = raw is List ? raw : (raw != null ? [raw] : <dynamic>[]);
+
           for (final t in list) {
             final m = t as Map?;
             if (m == null) continue;
@@ -224,7 +212,14 @@ class AllScrobblesService {
             final uts = m['date']?['uts']?.toString() ?? '';
             if (uts.isEmpty) continue;
             final sec = int.tryParse(uts);
-            if (sec != null) timestamps.add(sec);
+            if (sec == null) continue;
+
+            records.add(ScrobbleRecord(
+              ts:     sec,
+              track:  (m['name']           ?? '').toString(),
+              artist: (m['artist']?['name'] ?? (m['artist'] ?? '')).toString(),
+              album:  (m['album']?['#text'] ?? '').toString(),
+            ));
           }
 
           page++;
@@ -235,10 +230,10 @@ class AllScrobblesService {
         }
       } while (page <= totalPages);
 
-      timestamps.sort();
-      await ScrobblesFileCache.setYear(year, timestamps);
+      records.sort((a, b) => a.ts.compareTo(b.ts));
+      await ScrobblesFileCache.setYear(year, records);
       await _updateMeta(year);
-      return timestamps;
+      return records;
     } finally {
       _yearsInLoading.remove(year);
     }
@@ -246,9 +241,6 @@ class AllScrobblesService {
 
   // ── Chargement complet (première connexion) ───────────────────────────────
 
-  /// Charge toutes les années de l'inscription à aujourd'hui.
-  /// Met à jour [progressNotifier] en temps réel.
-  /// Passe silencieusement les années déjà en cache (sauf l'année en cours).
   static Future<void> loadAll(
     LastFmService service, {
     bool force = false,
@@ -264,7 +256,10 @@ class AllScrobblesService {
     try {
       for (var i = 0; i < years.length; i++) {
         final year = years[i];
-        if (!force && isYearCached(year) && year != currentYear) continue;
+
+        // Skip si déjà en cache complet (sauf l'année en cours)
+        if (!force && isYearCached(year) && isYearComplete(year) &&
+            year != currentYear) continue;
 
         progressNotifier.value = AllScrobblesProgress(
           isLoading:   true,
@@ -273,8 +268,6 @@ class AllScrobblesService {
           currentYear: year,
           yearIndex:   i,
           totalYears:  years.length,
-          loaded:      0,
-          total:       0,
         );
 
         await loadYear(year, service, force: force,
@@ -300,20 +293,27 @@ class AllScrobblesService {
 
   // ── Synchronisation incrémentale (lancements suivants) ───────────────────
 
-  /// Ne récupère que les scrobbles postérieurs au dernier timestamp connu.
-  /// Beaucoup plus rapide que loadAll() pour les lancements courants.
-  /// Met à jour [progressNotifier] pendant la sync.
+  /// Récupère uniquement les scrobbles postérieurs au dernier timestamp connu.
+  /// Fusionne avec les records existants.
   static Future<void> syncNew(LastFmService service) async {
     if (_running) return;
 
     final lastTs = lastCachedTimestamp;
-    if (lastTs == 0) {
-      // Aucun cache → revenir au chargement complet
+    if (lastTs == 0) return loadAll(service);
+
+    // Si des années en cache v1 (sans métadonnées), relancer un loadAll.
+    // On ne bloque pas pour ça — on le fait silencieusement.
+    final incompleteYears = getCachedYears()
+        .where((y) => isYearCached(y) && !isYearComplete(y))
+        .toList();
+    if (incompleteYears.isNotEmpty) {
+      debugPrint('[AllScrobbles] Années incomplètes (v1) → rechargement : '
+          '$incompleteYears');
       return loadAll(service);
     }
 
     _running = true;
-    final now = DateTime.now();
+    final now   = DateTime.now();
     final nowTs = now.millisecondsSinceEpoch ~/ 1000;
 
     progressNotifier.value = const AllScrobblesProgress(
@@ -324,7 +324,7 @@ class AllScrobblesService {
     );
 
     try {
-      final newTimestamps = <int>[];
+      final newRecords = <ScrobbleRecord>[];
       int page       = 1;
       int totalPages = 1;
 
@@ -344,17 +344,18 @@ class AllScrobblesService {
             final ttl = int.tryParse(
                 attr['total']?.toString() ?? '0') ?? 0;
             progressNotifier.value = AllScrobblesProgress(
-              isLoading: true,
-              isIdle:    false,
-              mode:      SyncMode.incremental,
-              loaded:    newTimestamps.length,
-              total:     ttl,
+              isLoading:  true,
+              isIdle:     false,
+              mode:       SyncMode.incremental,
+              loaded:     newRecords.length,
+              total:      ttl,
               totalYears: 1,
             );
           }
 
           final raw  = data['track'];
           final list = raw is List ? raw : (raw != null ? [raw] : <dynamic>[]);
+
           for (final t in list) {
             final m = t as Map?;
             if (m == null) continue;
@@ -362,7 +363,14 @@ class AllScrobblesService {
             final uts = m['date']?['uts']?.toString() ?? '';
             if (uts.isEmpty) continue;
             final sec = int.tryParse(uts);
-            if (sec != null) newTimestamps.add(sec);
+            if (sec == null) continue;
+
+            newRecords.add(ScrobbleRecord(
+              ts:     sec,
+              track:  (m['name']            ?? '').toString(),
+              artist: (m['artist']?['name']  ?? (m['artist'] ?? '')).toString(),
+              album:  (m['album']?['#text']  ?? '').toString(),
+            ));
           }
 
           page++;
@@ -373,37 +381,40 @@ class AllScrobblesService {
         }
       } while (page <= totalPages);
 
-      // Distribuer les nouveaux timestamps dans les années appropriées
-      if (newTimestamps.isNotEmpty) {
-        final byYear = <int, List<int>>{};
-        for (final ts in newTimestamps) {
-          final year = DateTime.fromMillisecondsSinceEpoch(ts * 1000).year;
-          (byYear[year] ??= []).add(ts);
+      // Distribuer les nouveaux records par année et fusionner
+      if (newRecords.isNotEmpty) {
+        final byYear = <int, List<ScrobbleRecord>>{};
+        for (final r in newRecords) {
+          final year = DateTime.fromMillisecondsSinceEpoch(r.ts * 1000).year;
+          (byYear[year] ??= []).add(r);
         }
 
         for (final entry in byYear.entries) {
           final year     = entry.key;
-          final existing = getTimestampsForYear(year) ?? [];
-          // Merge + déduplique + trie croissant
-          final merged   = ({...existing, ...entry.value}.toList()..sort());
+          final existing = getRecordsForYear(year) ?? [];
+
+          // Merge + déduplique par timestamp + trie croissant
+          final tsSet  = <int>{};
+          final merged = <ScrobbleRecord>[];
+          for (final r in [...existing, ...entry.value]) {
+            if (tsSet.add(r.ts)) merged.add(r);
+          }
+          merged.sort((a, b) => a.ts.compareTo(b.ts));
+
           await ScrobblesFileCache.setYear(year, merged);
           await _updateMeta(year);
         }
 
-        // Forcer le refresh de l'année en cours (TTL 1h)
+        // Rafraîchir le TTL de l'année en cours même sans nouveaux scrobbles
         if (!byYear.containsKey(now.year)) {
-          // Pas de nouveaux scrobbles cette année : rafraîchir le TTL quand même
-          final cur = getTimestampsForYear(now.year);
-          if (cur != null) {
-            await ScrobblesFileCache.setYear(now.year, cur);
-          }
+          final cur = getRecordsForYear(now.year);
+          if (cur != null) await ScrobblesFileCache.setYear(now.year, cur);
         }
       }
 
       _running = false;
       progressNotifier.value = AllScrobblesProgress.done(
-          newCount: newTimestamps.length,
-          mode:     SyncMode.incremental);
+          newCount: newRecords.length, mode: SyncMode.incremental);
 
     } catch (e) {
       debugPrint('[AllScrobbles] Erreur sync incrémentale : $e');
@@ -413,39 +424,38 @@ class AllScrobblesService {
     }
   }
 
-  // ── Forcer un rechargement complet ────────────────────────────────────────
+  // ── Rechargement forcé ────────────────────────────────────────────────────
 
-  /// Recharge toutes les années depuis zéro (force=true).
   static Future<void> forceReload(LastFmService service) =>
       loadAll(service, force: true);
 
-  // ── Calculs depuis les timestamps ─────────────────────────────────────────
+  // ── Calculs depuis les records ─────────────────────────────────────────────
 
   /// Répartition horaire {0..23 → compte}.
-  static Map<int, int> computeHourly(List<int> timestamps) {
+  static Map<int, int> computeHourly(List<ScrobbleRecord> records) {
     final h = <int, int>{for (var i = 0; i < 24; i++) i: 0};
-    for (final uts in timestamps) {
-      final dt = DateTime.fromMillisecondsSinceEpoch(uts * 1000);
+    for (final r in records) {
+      final dt = DateTime.fromMillisecondsSinceEpoch(r.ts * 1000);
       h[dt.hour] = (h[dt.hour] ?? 0) + 1;
     }
     return h;
   }
 
   /// Répartition par jour de la semaine {1(Lun)..7(Dim) → compte}.
-  static Map<int, int> computeWeekday(List<int> timestamps) {
+  static Map<int, int> computeWeekday(List<ScrobbleRecord> records) {
     final d = <int, int>{for (var i = 1; i <= 7; i++) i: 0};
-    for (final uts in timestamps) {
-      final dt = DateTime.fromMillisecondsSinceEpoch(uts * 1000);
+    for (final r in records) {
+      final dt = DateTime.fromMillisecondsSinceEpoch(r.ts * 1000);
       d[dt.weekday] = (d[dt.weekday] ?? 0) + 1;
     }
     return d;
   }
 
   /// Calendrier quotidien {"YYYY-MM-DD" → compte}.
-  static Map<String, int> computeCalendar(List<int> timestamps) {
+  static Map<String, int> computeCalendar(List<ScrobbleRecord> records) {
     final data = <String, int>{};
-    for (final uts in timestamps) {
-      final dt  = DateTime.fromMillisecondsSinceEpoch(uts * 1000);
+    for (final r in records) {
+      final dt  = DateTime.fromMillisecondsSinceEpoch(r.ts * 1000);
       final key = '${dt.year}-'
           '${dt.month.toString().padLeft(2, '0')}-'
           '${dt.day.toString().padLeft(2, '0')}';
@@ -455,10 +465,10 @@ class AllScrobblesService {
   }
 
   /// Scrobbles mensuels {"YYYY-MM" → compte}.
-  static Map<String, int> computeMonthly(List<int> timestamps) {
+  static Map<String, int> computeMonthly(List<ScrobbleRecord> records) {
     final data = <String, int>{};
-    for (final uts in timestamps) {
-      final dt  = DateTime.fromMillisecondsSinceEpoch(uts * 1000);
+    for (final r in records) {
+      final dt  = DateTime.fromMillisecondsSinceEpoch(r.ts * 1000);
       final key = '${dt.year}-${dt.month.toString().padLeft(2, '0')}';
       data[key] = (data[key] ?? 0) + 1;
     }
@@ -467,8 +477,8 @@ class AllScrobblesService {
 
   /// Total cumulé mois par mois pour [year].
   static Map<String, int> computeYearCumulative(
-      List<int> timestamps, int year) {
-    final monthly = computeMonthly(timestamps);
+      List<ScrobbleRecord> records, int year) {
+    final monthly = computeMonthly(records);
     int cum = 0;
     final result = <String, int>{};
     for (var m = 1; m <= 12; m++) {
@@ -492,8 +502,8 @@ class AllScrobblesService {
     }
     loaded.add(year);
     await ScrobblesFileCache.setMeta({
-      'loaded_years':   (loaded.toList()..sort()),
-      'last_sync_ts':   DateTime.now().millisecondsSinceEpoch,
+      'loaded_years': (loaded.toList()..sort()),
+      'last_sync_ts': DateTime.now().millisecondsSinceEpoch,
     });
   }
 }
