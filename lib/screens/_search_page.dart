@@ -656,12 +656,17 @@ class _FullProfileSheetState extends State<_FullProfileSheet> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.25)),
       ),
+      // Use staticValue so _MiniMetric shows pre-formatted strings here.
+      // The rolling animation is only for the main dashboard tab.
       child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-        _MiniMetric('🎯', _fmtFull(total),        L.dashScrobbles,    scheme.onPrimaryContainer),
+        _MiniMetric('🎯', L.dashScrobbles, scheme.onPrimaryContainer,
+            staticValue: _fmtFull(total)),
         Container(width: 1, height: 32, color: scheme.onPrimaryContainer.withValues(alpha: 0.15)),
-        _MiniMetric('⚡', '~${_fmt(avg.round())}', L.perDay,           scheme.onPrimaryContainer),
+        _MiniMetric('⚡', L.perDay, scheme.onPrimaryContainer,
+            staticValue: '~${_fmt(avg.round())}'),
         Container(width: 1, height: 32, color: scheme.onPrimaryContainer.withValues(alpha: 0.15)),
-        _MiniMetric('🗓️', '$days j',               L.activityDays,     scheme.onPrimaryContainer),
+        _MiniMetric('🗓️', L.activityDays, scheme.onPrimaryContainer,
+            staticValue: '$days j'),
       ]),
     );
   }

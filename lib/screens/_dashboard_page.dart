@@ -696,31 +696,39 @@ class _DashboardPageState extends State<_DashboardPage> {
         );
       case 'total':
         return _DashStatCard(
-          emoji: '🎯',
-          value: _fmtFull(total),
+          emoji:       '🎯',
+          value:       _fmtFull(total),
           label: localeNotifier.value == 'en' ? 'Total scrobbles' : 'Total scrobbles',
-          sub: null,
+          sub:         null,
+          rawInt:      total,
+          rollPrefix:  '',
         );
       case 'avg_day':
         return _DashStatCard(
-          emoji: '⚡',
-          value: '~${_fmt(avg.round())}',
-          label: L.dashScrobblesPerDay,
-          sub: null,
+          emoji:       '⚡',
+          value:       '~${_fmt(avg.round())}',
+          label:       L.dashScrobblesPerDay,
+          sub:         null,
+          rawInt:      avg.round(),
+          rollPrefix:  '~',
         );
       case 'avg_week':
         return _DashStatCard(
-          emoji: '📅',
-          value: '~${_fmt(weekly)}',
-          label: L.dashPerWeek,
-          sub: null,
+          emoji:       '📅',
+          value:       '~${_fmt(weekly)}',
+          label:       L.dashPerWeek,
+          sub:         null,
+          rawInt:      weekly,
+          rollPrefix:  '~',
         );
       case 'days_active':
         return _DashStatCard(
-          emoji: '🗓️',
-          value: '$days j',
-          label: L.dashDaysActive,
-          sub: null,
+          emoji:       '🗓️',
+          value:       '$days j',
+          label:       L.dashDaysActive,
+          sub:         null,
+          rawInt:      days,
+          rollSuffix:  ' j',
         );
       case 'since':
         return _DashStatCard(
@@ -2299,6 +2307,67 @@ class _SkeletonCard extends StatelessWidget {
   );
 }
 
+// ── Casino-style rolling number ──────────────────────────────────────────────
+// Counts from 0 to [target] once when first shown.
+// Use key: ValueKey(target) at call sites so it replays after a refresh.
+class _RollingNumber extends StatefulWidget {
+  final int      target;
+  final TextStyle? style;
+  final String   prefix;
+  final String   suffix;
+  final Duration duration;
+  final bool     fullFormat; // true → _fmtFull, false → _fmt
+
+  const _RollingNumber({
+    super.key,
+    required this.target,
+    this.style,
+    this.prefix    = '',
+    this.suffix    = '',
+    this.duration  = const Duration(milliseconds: 1100),
+    this.fullFormat = false,
+  });
+
+  @override
+  State<_RollingNumber> createState() => _RollingNumberState();
+}
+
+class _RollingNumberState extends State<_RollingNumber>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double>   _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: widget.duration);
+    // Ease out so it slows down at the end — classic slot machine feel
+    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+    _ctrl.forward();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _anim,
+      builder: (_, __) {
+        final current  = (_anim.value * widget.target).round();
+        final formatted = widget.fullFormat ? _fmtFull(current) : _fmt(current);
+        return Text(
+          '${widget.prefix}$formatted${widget.suffix}',
+          style: widget.style,
+        );
+      },
+    );
+  }
+}
+
 // Full number with thousand separator
 String _fmtFull(int n) {
   final s = n.toString();
@@ -2337,11 +2406,17 @@ class _HeroStatCard extends StatelessWidget {
           Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
             const Text('🎯', style: TextStyle(fontSize: 26)),
             const SizedBox(width: 12),
-            Text(_fmtFull(total),
-                style: text.displaySmall?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    color: scheme.onPrimaryContainer,
-                    height: 1)),
+            // Casino roll: counts up from 0 to total on first view
+            _RollingNumber(
+              key: ValueKey(total),
+              target:     total,
+              fullFormat: true,
+              duration:   const Duration(milliseconds: 1300),
+              style: text.displaySmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  color: scheme.onPrimaryContainer,
+                  height: 1),
+            ),
             const SizedBox(width: 8),
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
@@ -2362,11 +2437,14 @@ class _HeroStatCard extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                _MiniMetric('⚡', '~${_fmt(avg)}', L.dashScrobblesPerDay, scheme.onPrimaryContainer),
+                _MiniMetric('⚡', L.dashScrobblesPerDay, scheme.onPrimaryContainer,
+                    rawInt: avg, prefix: '~'),
                 _vDivider(scheme.onPrimaryContainer),
-                _MiniMetric('📅', '~${_fmt(weekly)}', L.dashPerWeek, scheme.onPrimaryContainer),
+                _MiniMetric('📅', L.dashPerWeek, scheme.onPrimaryContainer,
+                    rawInt: weekly, prefix: '~'),
                 _vDivider(scheme.onPrimaryContainer),
-                _MiniMetric('🗓️', '$days j', L.dashDaysActive, scheme.onPrimaryContainer),
+                _MiniMetric('🗓️', L.dashDaysActive, scheme.onPrimaryContainer,
+                    rawInt: days, suffix: ' j'),
               ],
             ),
           ),
@@ -2381,18 +2459,46 @@ class _HeroStatCard extends StatelessWidget {
 }
 
 class _MiniMetric extends StatelessWidget {
-  final String emoji, value, label;
-  final Color color;
-  const _MiniMetric(this.emoji, this.value, this.label, this.color);
+  final String  emoji, label;
+  final Color   color;
+  // Optional raw int — when set, the value rolls up from 0.
+  // When null, [staticValue] is shown as-is.
+  final int?    rawInt;
+  final String  prefix;
+  final String  suffix;
+  final String? staticValue;
+
+  const _MiniMetric(
+    this.emoji,
+    this.label,
+    this.color, {
+    this.rawInt,
+    this.prefix      = '',
+    this.suffix      = '',
+    this.staticValue,
+  });
 
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
+    final valueStyle = text.bodyMedium?.copyWith(
+        fontWeight: FontWeight.w800, color: color);
+
     return Column(mainAxisSize: MainAxisSize.min, children: [
       Text(emoji, style: const TextStyle(fontSize: 16)),
       const SizedBox(height: 2),
-      Text(value, style: text.bodyMedium?.copyWith(
-          fontWeight: FontWeight.w800, color: color)),
+      // Use rolling animation when a raw int is provided
+      if (rawInt != null)
+        _RollingNumber(
+          key:      ValueKey('mini_${rawInt}_$prefix$suffix'),
+          target:   rawInt!,
+          prefix:   prefix,
+          suffix:   suffix,
+          duration: const Duration(milliseconds: 1000),
+          style:    valueStyle,
+        )
+      else
+        Text(staticValue ?? '', style: valueStyle),
       Text(label, style: text.labelSmall?.copyWith(
           color: color.withValues(alpha: 0.65))),
     ]);
@@ -2422,15 +2528,30 @@ class _StatGrid extends StatelessWidget {
 
 // Secondary stat card
 class _DashStatCard extends StatelessWidget {
-  final String emoji, value, label;
+  final String  emoji, value, label;
   final String? sub;
-  const _DashStatCard({required this.emoji, required this.value,
-      required this.label, this.sub});
+  // When set, the value text rolls up from 0 instead of appearing instantly
+  final int?    rawInt;
+  final String  rollPrefix;
+  final String  rollSuffix;
+
+  const _DashStatCard({
+    required this.emoji,
+    required this.value,
+    required this.label,
+    this.sub,
+    this.rawInt,
+    this.rollPrefix = '',
+    this.rollSuffix = '',
+  });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final text   = Theme.of(context).textTheme;
+    final valueStyle = text.bodyLarge?.copyWith(
+        fontWeight: FontWeight.w800, color: scheme.onSurface);
+
     return Card(
       elevation: 0,
       color: scheme.surfaceContainerHighest,
@@ -2443,19 +2564,28 @@ class _DashStatCard extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(emoji, style: const TextStyle(fontSize: 22)),
           const SizedBox(height: 6),
-          // Cross-fades when the value changes on a silent background refresh
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 300),
-            transitionBuilder: (c, a) => FadeTransition(opacity: a, child: c),
-            child: Text(
-              value,
-              key: ValueKey(value),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: text.bodyLarge?.copyWith(
-                  fontWeight: FontWeight.w800, color: scheme.onSurface),
+          // Roll up from 0 if rawInt is provided, otherwise cross-fade on change
+          if (rawInt != null)
+            _RollingNumber(
+              key:      ValueKey('dash_${rawInt}_$rollPrefix$rollSuffix'),
+              target:   rawInt!,
+              prefix:   rollPrefix,
+              suffix:   rollSuffix,
+              duration: const Duration(milliseconds: 1000),
+              style:    valueStyle,
+            )
+          else
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 300),
+              transitionBuilder: (c, a) => FadeTransition(opacity: a, child: c),
+              child: Text(
+                value,
+                key: ValueKey(value),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: valueStyle,
+              ),
             ),
-          ),
           Text(label, style: text.bodySmall?.copyWith(
               color: scheme.primary, fontWeight: FontWeight.w600)),
           if (sub != null)
