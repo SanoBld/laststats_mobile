@@ -16,7 +16,8 @@ dependencies:
   shared_preferences: ^2.2.3
   path_provider: ^2.1.5
   url_launcher: ^6.3.0
-  palette_generator: ^0.3.3   # Extraction couleur depuis pochette
+  palette_generator: ^0.3.3
+  flutter_local_notifications: ^18.0.0   # Local notifications (scrobble events)
 
 dev_dependencies:
   flutter_test:
@@ -24,13 +25,13 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.3
 
-# ── Icône de l'app ─────────────────────────────────────
+# ── App icon ───────────────────────────────────────────
 flutter_launcher_icons:
   android: true
   ios: true
   image_path: "assets/images/icon-512.png"
   min_sdk_android: 21
-  adaptive_icon_background: "#1558D6"   # bleu de fond du logo
+  adaptive_icon_background: "#1558D6"
   adaptive_icon_foreground: "assets/images/icon-512.png"
   web:
     generate: false
