@@ -1,12 +1,12 @@
 // ignore_for_file: unused_import
 // lib/screens/_settings_page.dart
 // ══════════════════════════════════════════════════════════════════════════
-//  Onglet Paramètres — Hub de navigation vers les sous-pages
-//  Toutes les options sont groupées par thème dans des pages dédiées.
+//  Settings tab — navigation hub to sub-pages.
+//  All options are grouped by theme in dedicated pages.
 // ══════════════════════════════════════════════════════════════════════════
 part of 'home_screen.dart';
 
-// ── Données des cartes ────────────────────────────────────────────────────────
+// ── Card data model ───────────────────────────────────────────────────────────
 
 class _SettingsCardData {
   final IconData icon;
@@ -26,7 +26,7 @@ class _SettingsCardData {
   });
 }
 
-// ── Page principale (hub) ─────────────────────────────────────────────────────
+// ── Main settings page (hub) ──────────────────────────────────────────────────
 
 class _SettingsPage extends StatefulWidget {
   final String username;
@@ -169,16 +169,16 @@ class _SettingsPageState extends State<_SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final text   = Theme.of(context).textTheme;
-    final isEn   = localeNotifier.value == 'en';
-    final cards  = _buildCards();
+    final scheme  = Theme.of(context).colorScheme;
+    final text    = Theme.of(context).textTheme;
+    final isEn    = localeNotifier.value == 'en';
+    final cards   = _buildCards();
     final initial = widget.username.isNotEmpty ? widget.username[0].toUpperCase() : '?';
 
     return SafeArea(
       child: CustomScrollView(
         slivers: [
-          // ── En-tête ────────────────────────────────────────────────────
+          // ── Header ─────────────────────────────────────────────────────
           SliverToBoxAdapter(child: Padding(
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -186,7 +186,7 @@ class _SettingsPageState extends State<_SettingsPage> {
                   style: text.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
               const SizedBox(height: 16),
 
-              // Carte profil compact
+              // Compact profile card
               GestureDetector(
                 onTap: () => _push(context, AccountPage(username: widget.username)),
                 child: Container(
@@ -214,23 +214,27 @@ class _SettingsPageState extends State<_SettingsPage> {
                   ]),
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
 
-              // Bannière mise à jour disponible
+              // ── PC / Desktop layout mode ──────────────────────────────
+              _PcModeCard(isEn: isEn),
+              const SizedBox(height: 12),
+
+              // Update available banner
               if (_updateInfo != null)
                 _UpdateBanner(
                   info: _updateInfo!,
                   onTap: () => _push(context, const UpdatesPage()),
                 ),
-              if (_updateInfo != null) const SizedBox(height: 16),
+              if (_updateInfo != null) const SizedBox(height: 12),
 
-              // Bannière "redémarrage requis"
+              // "Restart required" notice
               const _RestartNotice(),
               const SizedBox(height: 20),
             ]),
           )),
 
-          // ── Grille de catégories ───────────────────────────────────────
+          // ── Category grid ───────────────────────────────────────────────
           SliverPadding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             sliver: SliverGrid(
@@ -252,7 +256,7 @@ class _SettingsPageState extends State<_SettingsPage> {
             ),
           ),
 
-          // ── Pied de page ───────────────────────────────────────────────
+          // ── Footer ─────────────────────────────────────────────────────
           SliverToBoxAdapter(child: Padding(
             padding: const EdgeInsets.fromLTRB(20, 28, 20, 20),
             child: Column(children: [
@@ -282,7 +286,153 @@ class _SettingsPageState extends State<_SettingsPage> {
   }
 }
 
-// ── Carte catégorie ───────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+//  PC / Desktop layout mode card
+// ══════════════════════════════════════════════════════════════════════════════
+
+class _PcModeCard extends StatefulWidget {
+  final bool isEn;
+  const _PcModeCard({required this.isEn});
+
+  @override
+  State<_PcModeCard> createState() => _PcModeCardState();
+}
+
+class _PcModeCardState extends State<_PcModeCard> {
+  String _mode = pcModeNotifier.value;
+
+  @override
+  void initState() {
+    super.initState();
+    pcModeNotifier.addListener(_sync);
+  }
+
+  @override
+  void dispose() {
+    pcModeNotifier.removeListener(_sync);
+    super.dispose();
+  }
+
+  void _sync() => setState(() => _mode = pcModeNotifier.value);
+
+  Future<void> _update(String newMode) async {
+    pcModeNotifier.value = newMode;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('ls_pc_mode', newMode);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text   = Theme.of(context).textTheme;
+    final isEn   = widget.isEn;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color:        scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+            color: scheme.outlineVariant.withValues(alpha: 0.45)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // ── Header ─────────────────────────────────────────────────────
+        Row(children: [
+          Container(
+            width: 38, height: 38,
+            decoration: BoxDecoration(
+              color: scheme.secondaryContainer,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(Icons.desktop_windows_outlined,
+                color: scheme.onSecondaryContainer, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(
+              isEn ? 'Navigation layout' : 'Disposition de navigation',
+              style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            Text(
+              isEn
+                  ? 'Side rail on wide screens, bottom bar on mobile'
+                  : 'Rail latéral sur grand écran, barre bas sur mobile',
+              style: text.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant, height: 1.3),
+            ),
+          ])),
+        ]),
+        const SizedBox(height: 14),
+
+        // ── Segmented button ────────────────────────────────────────────
+        // Three segments: Auto / Side rail / Bottom bar
+        SizedBox(
+          width: double.infinity,
+          child: SegmentedButton<String>(
+            segments: [
+              ButtonSegment<String>(
+                value: 'auto',
+                icon:  const Icon(Icons.auto_mode_rounded, size: 16),
+                label: Text(isEn ? 'Auto' : 'Auto'),
+              ),
+              ButtonSegment<String>(
+                value: 'on',
+                icon:  const Icon(Icons.view_sidebar_outlined, size: 16),
+                label: Text(isEn ? 'Side rail' : 'Rail latéral'),
+              ),
+              ButtonSegment<String>(
+                value: 'off',
+                icon:  const Icon(Icons.view_headline_rounded, size: 16),
+                label: Text(isEn ? 'Bottom bar' : 'Barre bas'),
+              ),
+            ],
+            selected: {_mode},
+            onSelectionChanged: (sel) => _update(sel.first),
+            style: SegmentedButton.styleFrom(
+              // Keep the button compact to fit all 3 labels on narrow screens
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: const VisualDensity(vertical: -1),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+
+        // ── Hint line ───────────────────────────────────────────────────
+        Row(children: [
+          Icon(Icons.info_outline_rounded,
+              size: 13, color: scheme.onSurfaceVariant),
+          const SizedBox(width: 6),
+          Expanded(child: Text(
+            _modeHint(isEn),
+            style: text.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant.withValues(alpha: 0.75),
+                height: 1.3),
+          )),
+        ]),
+      ]),
+    );
+  }
+
+  /// Short explanatory hint that adapts to the current selection.
+  String _modeHint(bool isEn) {
+    switch (_mode) {
+      case 'on':
+        return isEn
+            ? 'Side rail always visible. Labels expand above 1200 dp.'
+            : 'Rail latéral toujours visible. Labels étendus au-delà de 1200 dp.';
+      case 'off':
+        return isEn
+            ? 'Bottom navigation bar on all screen sizes.'
+            : 'Barre de navigation basse sur toutes les tailles d\'écran.';
+      default: // 'auto'
+        return isEn
+            ? 'Side rail above 720 dp, bottom bar below.'
+            : 'Rail latéral au-delà de 720 dp, barre basse en dessous.';
+    }
+  }
+}
+
+// ── Category card ─────────────────────────────────────────────────────────────
 
 class _CategoryCard extends StatelessWidget {
   final _SettingsCardData data;
@@ -316,7 +466,7 @@ class _CategoryCard extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           child: Stack(children: [
             Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              // Icône
+              // Icon
               Container(
                 width: 44, height: 44,
                 decoration: BoxDecoration(
@@ -326,19 +476,19 @@ class _CategoryCard extends StatelessWidget {
                 child: Icon(data.icon, color: data.iconFgColor(scheme), size: 24),
               ),
               const Spacer(),
-              // Titre
+              // Title
               Text(data.title(),
                   maxLines: 1, overflow: TextOverflow.ellipsis,
                   style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w700)),
               const SizedBox(height: 2),
-              // Sous-titre
+              // Subtitle
               Text(data.subtitle(),
                   maxLines: 2, overflow: TextOverflow.ellipsis,
                   style: text.bodySmall?.copyWith(
                       color: scheme.onSurfaceVariant, height: 1.3)),
             ]),
 
-            // Badge notification (ex: mise à jour dispo)
+            // Notification badge (e.g. update available)
             if (badge != null)
               Positioned(
                 top: 0, right: 0,
@@ -352,7 +502,7 @@ class _CategoryCard extends StatelessWidget {
                 ),
               ),
 
-            // Flèche
+            // Arrow
             Positioned(
               bottom: 0, right: 0,
               child: Icon(Icons.arrow_forward_ios_rounded,
@@ -365,7 +515,7 @@ class _CategoryCard extends StatelessWidget {
   }
 }
 
-// ── Bannière mise à jour ──────────────────────────────────────────────────────
+// ── Update banner ─────────────────────────────────────────────────────────────
 
 class _UpdateBanner extends StatelessWidget {
   final UpdateInfo info;
@@ -405,7 +555,7 @@ class _UpdateBanner extends StatelessWidget {
   }
 }
 
-// ── Notice de redémarrage ─────────────────────────────────────────────────────
+// ── Restart notice ────────────────────────────────────────────────────────────
 
 class _RestartNotice extends StatelessWidget {
   const _RestartNotice();

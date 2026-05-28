@@ -641,11 +641,19 @@ class _FirstLoadScreenState extends State<_FirstLoadScreen>
       body: FadeTransition(
         opacity: _fade,
         child: SafeArea(
-          child: Padding(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: MediaQuery.of(context).size.height
+                           - MediaQuery.of(context).padding.top
+                           - MediaQuery.of(context).padding.bottom
+                           - 48, // padding vertical × 2
+              ),
+              child: IntrinsicHeight(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
 
                 const Spacer(flex: 2),
 
@@ -778,11 +786,13 @@ class _FirstLoadScreenState extends State<_FirstLoadScreen>
                 ),
                 const SizedBox(height: 8),
               ],
-            ),
-          ),
-        ),
-      ),
-    );
+            ),          // fin Column
+          ),            // fin IntrinsicHeight
+        ),              // fin ConstrainedBox
+      ),                // fin SingleChildScrollView
+    ),                  // fin SafeArea
+  ),                    // fin FadeTransition
+);
   }
 }
 

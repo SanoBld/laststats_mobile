@@ -1,12 +1,12 @@
 // lib/main.dart
 // ══════════════════════════════════════════════════════════════════════════
-//  Point d'entrée de l'application LastStats
+//  LastStats entry point.
 //
-//  Comportement au démarrage :
-//    • Credentials présents → HomeScreen directement (pas d'écran de chargement)
-//      Le préchargement en arrière-plan est lancé depuis HomeScreen.initState.
-//    • Premiers accès → SetupScreen → _FirstLoadScreen (import complet avec
-//      progression détaillée) → HomeScreen.
+//  Startup behaviour:
+//    • Credentials present → HomeScreen directly (no loading splash).
+//      Background prefetch is launched from HomeScreen.initState.
+//    • First launch → SetupScreen → _FirstLoadScreen (full import with
+//      detailed progress) → HomeScreen.
 // ══════════════════════════════════════════════════════════════════════════
 
 import 'package:flutter/material.dart';
@@ -27,22 +27,28 @@ void main() async {
   final apiKey     = prefs.getString('ls_apikey')   ?? '';
   final startupTab = prefs.getInt('ls_startup_tab') ?? 0;
 
-  // ── Paramètres d'apparence ──────────────────────────────────────────────
+  // ── Appearance settings ─────────────────────────────────────────────────
   themeModeNotifier.value          = themeFromString(prefs.getString('ls_theme'));
   accentNotifier.value             = accentFromString(prefs.getString('ls_accent'));
   useDynamicColorNotifier.value    = prefs.getBool('ls_use_dynamic_color')    ?? false;
   useNowPlayingColorNotifier.value = prefs.getBool('ls_use_nowplaying_color') ?? false;
   localeNotifier.value             = prefs.getString('ls_locale') ?? 'fr';
 
-  // ── Cache de données scrobble ────────────────────────────────────────────
+  // ── Layout / PC mode ('auto' | 'on' | 'off') ────────────────────────────
+  // 'auto'  → side rail when width ≥ 720 dp
+  // 'on'    → always side rail
+  // 'off'   → always bottom bar
+  pcModeNotifier.value = prefs.getString('ls_pc_mode') ?? 'auto';
+
+  // ── Scrobble data cache ─────────────────────────────────────────────────
   await DataCache.init();
   await DataCache.clearExpired();
 
-  // ── Cache fichier historique (ScrobblesFileCache) ────────────────────────
+  // ── History file cache (ScrobblesFileCache) ─────────────────────────────
   await ScrobblesFileCache.init();
-  ScrobblesFileCache.pruneExpired(); // non-bloquant
+  ScrobblesFileCache.pruneExpired(); // non-blocking
 
-  // ── Cache d'images (nettoyage non-bloquant) ──────────────────────────────
+  // ── Image cache cleanup (non-blocking) ──────────────────────────────────
   ImageService.pruneExpired();
 
   runApp(LastStatsApp(
@@ -112,9 +118,9 @@ class LastStatsApp extends StatelessWidget {
                             useMaterial3: true,
                           ),
                           themeMode: mode,
-                          // ── Routing ─────────────────────────────────────
-                          // Credentials présents → HomeScreen directement.
-                          // Le prefetch en arrière-plan est géré par HomeScreen.
+                          // ── Routing ───────────────────────────────────
+                          // Credentials present → HomeScreen directly.
+                          // Background prefetch is handled by HomeScreen.
                           home: (username.isNotEmpty && apiKey.isNotEmpty)
                               ? HomeScreen(
                                   username:   username,

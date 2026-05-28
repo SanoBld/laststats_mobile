@@ -1,14 +1,18 @@
 // lib/services/scrobbles_file_cache.dart
 // ══════════════════════════════════════════════════════════════════════════
-//  ScrobblesFileCache — stockage fichier de l'historique complet
+//  ScrobblesFileCache — stockage multi-plateforme de l'historique complet
 //
 //  Chaque scrobble est stocké avec ses métadonnées complètes :
 //    timestamp, titre, artiste, album
 //  Format compact (tableau JSON) pour minimiser l'espace disque.
 //
-//  Structure fichiers :
-//    {appSupportDir}/scrobbles/{year}.json  → {"v":2,"ts":…,"data":[[ts,"Track","Artist","Album"],…]}
-//    {appSupportDir}/scrobbles/meta.json    → {"ts":…,"data":{…}}
+//  Backends :
+//    • Natif (Android / iOS / Desktop) → fichiers via path_provider
+//    • Web                             → SharedPreferences (localStorage)
+//
+//  Structure stockage :
+//    Clé "year_YYYY" → {"v":2,"ts":…,"data":[[ts,"Track","Artist","Album"],…]}
+//    Clé "meta"      → {"ts":…,"data":{…}}
 //
 //  Rétrocompat :
 //    v1 (anciens fichiers, timestamps seulement) → chargés comme ScrobbleRecord
@@ -36,9 +40,12 @@
 // ══════════════════════════════════════════════════════════════════════════
 
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
+
+// Import conditionnel : le compilateur choisit le bon backend selon la cible.
+import 'scrobbles_cache_backend_stub.dart'
+    if (dart.library.io)   'scrobbles_cache_backend_native.dart'
+    if (dart.library.html) 'scrobbles_cache_backend_web.dart';
 
 // ══════════════════════════════════════════════════════════════════════════
 //  Modèle
@@ -95,10 +102,11 @@ class ScrobblesFileCache {
   // ── Cache mémoire ─────────────────────────────────────────────────────────
   static final Map<int, List<ScrobbleRecord>> _years = {};
   static Map<String, dynamic>?                _meta;
+  static bool                                 _initialized = false;
 
-  // ── Répertoire de travail ─────────────────────────────────────────────────
-  static Directory? _dir;
-  static bool       _initialized = false;
+  // ── Clés de stockage ──────────────────────────────────────────────────────
+  static String _yearKey(int year) => 'year_$year';
+  static const  _metaKey = 'meta';
 
   // ──────────────────────────────────────────────────────────────────────────
   //  Init
@@ -109,22 +117,21 @@ class ScrobblesFileCache {
     _initialized = true;
 
     try {
-      final dir = await _ensureDir();
       final now = DateTime.now().millisecondsSinceEpoch;
 
-      // Méta
-      final mf = _metaFile(dir);
-      if (mf.existsSync()) {
+      // ── Méta ────────────────────────────────────────────────────────────────
+      final metaRaw = await CacheBackend.read(_metaKey);
+      if (metaRaw != null) {
         try {
-          final raw = jsonDecode(mf.readAsStringSync()) as Map<String, dynamic>;
-          final ts  = (raw['ts'] as num?)?.toInt() ?? 0;
+          final decoded = jsonDecode(metaRaw) as Map<String, dynamic>;
+          final ts      = (decoded['ts'] as num?)?.toInt() ?? 0;
           if ((now - ts) <= _ttlMetaMs) {
-            _meta = raw['data'] as Map<String, dynamic>?;
+            _meta = decoded['data'] as Map<String, dynamic>?;
           }
         } catch (_) {}
       }
 
-      // Années listées dans la méta
+      // ── Années listées dans la méta ─────────────────────────────────────────
       final years = _meta == null
           ? <int>[]
           : ((_meta!['loaded_years'] as List?)
@@ -133,15 +140,15 @@ class ScrobblesFileCache {
               []);
 
       for (final year in years) {
-        final f = _yearFile(dir, year);
-        if (!f.existsSync()) continue;
+        final raw = await CacheBackend.read(_yearKey(year));
+        if (raw == null) continue;
         try {
-          final raw     = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
-          final ts      = (raw['ts'] as num?)?.toInt() ?? 0;
-          final version = (raw['v']  as num?)?.toInt() ?? 1;
+          final decoded = jsonDecode(raw) as Map<String, dynamic>;
+          final ts      = (decoded['ts'] as num?)?.toInt() ?? 0;
+          final version = (decoded['v']  as num?)?.toInt() ?? 1;
           if ((now - ts) > _ttlOf(year)) continue;
 
-          final records = _parseRecords(raw['data'], version);
+          final records = _parseRecords(decoded['data'], version);
           if (records != null) _years[year] = records;
         } catch (_) {}
       }
@@ -194,14 +201,13 @@ class ScrobblesFileCache {
   static Future<void> setYear(int year, List<ScrobbleRecord> records) async {
     _years[year] = records;
     try {
-      final dir = await _ensureDir();
-      final ts  = DateTime.now().millisecondsSinceEpoch;
+      final ts      = DateTime.now().millisecondsSinceEpoch;
       final payload = jsonEncode({
         'v':    _fileVersion,
         'ts':   ts,
         'data': records.map((r) => r.toList()).toList(),
       });
-      await _yearFile(dir, year).writeAsString(payload);
+      await CacheBackend.write(_yearKey(year), payload);
     } catch (e) {
       debugPrint('[ScrobblesCache] Erreur écriture année=$year : $e');
     }
@@ -210,33 +216,22 @@ class ScrobblesFileCache {
   static Future<void> setMeta(Map<String, dynamic> meta) async {
     _meta = meta;
     try {
-      final dir = await _ensureDir();
-      final ts  = DateTime.now().millisecondsSinceEpoch;
-      await _metaFile(dir).writeAsString(jsonEncode({'ts': ts, 'data': meta}));
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      await CacheBackend.write(
+        _metaKey,
+        jsonEncode({'ts': ts, 'data': meta}),
+      );
     } catch (e) {
       debugPrint('[ScrobblesCache] Erreur écriture meta : $e');
     }
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  //  Stats disque
+  //  Stats stockage
   // ──────────────────────────────────────────────────────────────────────────
 
-  /// Taille totale du répertoire scrobbles en octets.
-  static Future<int> getDiskUsageBytes() async {
-    try {
-      final dir = await _ensureDir();
-      int total = 0;
-      await for (final entity in dir.list()) {
-        if (entity is File) {
-          try { total += await entity.length(); } catch (_) {}
-        }
-      }
-      return total;
-    } catch (_) {
-      return 0;
-    }
-  }
+  /// Taille totale du cache en octets.
+  static Future<int> getDiskUsageBytes() => CacheBackend.totalBytes();
 
   // ──────────────────────────────────────────────────────────────────────────
   //  Nettoyage
@@ -244,24 +239,28 @@ class ScrobblesFileCache {
 
   static Future<void> pruneExpired() async {
     try {
-      final dir = await _ensureDir();
-      final now = DateTime.now().millisecondsSinceEpoch;
-      await for (final entity in dir.list()) {
-        if (entity is! File) continue;
-        final name = entity.uri.pathSegments.last;
-        if (name == 'meta.json') continue;
-        final year = int.tryParse(name.replaceAll('.json', ''));
+      final now  = DateTime.now().millisecondsSinceEpoch;
+      final keys = await CacheBackend.listKeys();
+
+      for (final key in keys) {
+        if (key == _metaKey) continue;
+        // Clés d'années : "year_YYYY"
+        if (!key.startsWith('year_')) continue;
+        final year = int.tryParse(key.replaceFirst('year_', ''));
         if (year == null) continue;
+
+        final raw = await CacheBackend.read(key);
+        if (raw == null) continue;
         try {
-          final raw = jsonDecode(await entity.readAsString()) as Map<String, dynamic>;
-          final ts  = (raw['ts'] as num?)?.toInt() ?? 0;
+          final decoded = jsonDecode(raw) as Map<String, dynamic>;
+          final ts      = (decoded['ts'] as num?)?.toInt() ?? 0;
           if ((now - ts) > _ttlOf(year)) {
-            await entity.delete();
+            await CacheBackend.delete(key);
             _years.remove(year);
-            debugPrint('[ScrobblesCache] $year.json supprimé (expiré).');
+            debugPrint('[ScrobblesCache] $year supprimé (expiré).');
           }
         } catch (_) {
-          await entity.delete();
+          await CacheBackend.delete(key);
         }
       }
     } catch (_) {}
@@ -270,11 +269,8 @@ class ScrobblesFileCache {
   static Future<void> clear() async {
     _years.clear();
     _meta = null;
-    try {
-      final dir = await _ensureDir();
-      if (dir.existsSync()) await dir.delete(recursive: true);
-      await dir.create(recursive: true);
-    } catch (_) {}
+    _initialized = false;
+    await CacheBackend.clearAll();
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -283,19 +279,6 @@ class ScrobblesFileCache {
 
   static int _ttlOf(int year) =>
       year == DateTime.now().year ? _ttlCurrentMs : _ttlPastMs;
-
-  static Future<Directory> _ensureDir() async {
-    if (_dir != null && _dir!.existsSync()) return _dir!;
-    final base = await getApplicationSupportDirectory();
-    _dir = Directory('${base.path}/scrobbles');
-    await _dir!.create(recursive: true);
-    return _dir!;
-  }
-
-  static File _yearFile(Directory dir, int year) =>
-      File('${dir.path}/$year.json');
-
-  static File _metaFile(Directory dir) => File('${dir.path}/meta.json');
 
   /// Parse les données selon la version du fichier.
   static List<ScrobbleRecord>? _parseRecords(dynamic data, int version) {

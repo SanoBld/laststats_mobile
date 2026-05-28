@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
 
-// ── Notifiers globaux ────────────────────────────────────────────────────────
+// ── Global notifiers ─────────────────────────────────────────────────────────
 final themeModeNotifier          = ValueNotifier<ThemeMode>(ThemeMode.system);
 final accentNotifier             = ValueNotifier<Color>(const Color(0xFF7C3AED));
 final useDynamicColorNotifier    = ValueNotifier<bool>(false);
 final useNowPlayingColorNotifier = ValueNotifier<bool>(false);
 final localeNotifier             = ValueNotifier<String>('fr'); // 'fr' | 'en'
+
+/// Controls the navigation layout:
+///   'auto' → wide rail when screen width ≥ 720 dp (default)
+///   'on'   → always use the side rail (even on narrow screens)
+///   'off'  → always use the bottom navigation bar
+final pcModeNotifier = ValueNotifier<String>('auto');
 
 ThemeMode themeFromString(String? s) {
   switch (s) {
@@ -15,7 +21,7 @@ ThemeMode themeFromString(String? s) {
   }
 }
 
-/// Accepte une clé nommée ('purple', 'blue'…) ou un code hex '#RRGGBB'.
+/// Accepts a named key ('purple', 'blue'…) or a hex code '#RRGGBB'.
 Color accentFromString(String? s) {
   if (s == null) return const Color(0xFF7C3AED);
   if (s.startsWith('#') && s.length == 7) {
@@ -34,7 +40,7 @@ Color accentFromString(String? s) {
   }
 }
 
-/// Convertit une [Color] en chaîne '#RRGGBB' majuscule.
+/// Converts a [Color] to an uppercase '#RRGGBB' string.
 String colorToHex(Color c) {
   final r = (c.r * 255).round().clamp(0, 255).toRadixString(16).padLeft(2, '0');
   final g = (c.g * 255).round().clamp(0, 255).toRadixString(16).padLeft(2, '0');
