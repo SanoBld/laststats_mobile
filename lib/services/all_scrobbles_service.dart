@@ -405,7 +405,10 @@ class AllScrobblesService {
           await ScrobblesFileCache.setYear(year, merged);
           await _updateMeta(year);
         }
-
+      } else {
+        // Aucun nouveau scrobble : on met quand même à jour last_sync_ts
+        // pour enregistrer que la synchro a bien eu lieu à cet instant.
+        await _updateMeta(now.year);
       }
 
       _running = false;

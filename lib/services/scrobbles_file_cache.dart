@@ -163,9 +163,14 @@ class ScrobblesFileCache {
   static bool isYearCached(int year) => _years.containsKey(year);
 
   /// Vrai si tous les records de [year] ont leurs métadonnées (track+artist).
+  /// Une année sans aucun scrobble (liste vide) est considérée complète :
+  /// elle a bien été chargée depuis l'API, il n'y avait simplement rien.
+  /// Retourne false uniquement si la clé est absente (jamais chargée) ou si
+  /// au moins un record manque ses métadonnées (ancien cache v1).
   static bool isYearComplete(int year) {
     final records = _years[year];
-    if (records == null || records.isEmpty) return false;
+    if (records == null) return false;          // jamais chargée
+    if (records.isEmpty) return true;           // année blanche = complète
     return records.every((r) => r.hasMetadata);
   }
 
