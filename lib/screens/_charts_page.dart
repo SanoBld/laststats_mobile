@@ -639,7 +639,7 @@ class _ChartsPageState extends State<_ChartsPage>
           ],
           const SizedBox(height: 24),
 
-          // ── 5. Répartition artistes (all-time) ────────────────────────────
+          // ── 5. Artist distribution (all-time) ────────────────────────────
           if (_topArtists.isNotEmpty) ...[
             _SectionHeader(title: L.chartsArtistDist, icon: Icons.mic_rounded),
             const SizedBox(height: 4),
@@ -656,10 +656,21 @@ class _ChartsPageState extends State<_ChartsPage>
               onTap: (e) => showDetailSheet(context,
                   Map<String, dynamic>.from(e as Map), 'artists', widget.service),
             ),
+            const SizedBox(height: 12),
+            // Horizontal ranked bars — complementary view
+            _TopHorizontalBarCard(
+              items:    _topArtists,
+              getLabel: (e) => (e['name'] ?? '').toString(),
+              getPlays: (e) =>
+                  int.tryParse((e['playcount'] ?? '0').toString()) ?? 0,
+              barColor: scheme.primary,
+              onTap: (e) => showDetailSheet(context,
+                  Map<String, dynamic>.from(e as Map), 'artists', widget.service),
+            ),
             const SizedBox(height: 24),
           ],
 
-          // ── 6. Répartition albums (all-time) ──────────────────────────────
+          // ── 6. Album distribution (all-time) ─────────────────────────────
           if (_topAlbums.isNotEmpty) ...[
             _SectionHeader(
               title: _ct('Répartition par album', 'Album distribution'),
@@ -679,10 +690,21 @@ class _ChartsPageState extends State<_ChartsPage>
               onTap: (e) => showDetailSheet(context,
                   Map<String, dynamic>.from(e as Map), 'albums', widget.service),
             ),
+            const SizedBox(height: 12),
+            // Horizontal ranked bars — complementary view
+            _TopHorizontalBarCard(
+              items:    _topAlbums,
+              getLabel: (e) => (e['name'] ?? '').toString(),
+              getPlays: (e) =>
+                  int.tryParse((e['playcount'] ?? '0').toString()) ?? 0,
+              barColor: scheme.secondary,
+              onTap: (e) => showDetailSheet(context,
+                  Map<String, dynamic>.from(e as Map), 'albums', widget.service),
+            ),
             const SizedBox(height: 24),
           ],
 
-          // ── 7. Calendrier musical ─────────────────────────────────────────
+          // ── 7. Listening calendar ────────────────────────────────────────
           _SectionHeader(
             title: _ct('Calendrier musical', 'Listening calendar'),
             icon: Icons.grid_on_rounded,
@@ -709,7 +731,18 @@ class _ChartsPageState extends State<_ChartsPage>
           else if (_calendarData != null)
             _CalendarCard(data: _calendarData!, year: _selectedYear,
                 fullYear: hasFullData),
-          const SizedBox(height: 20),
+          const SizedBox(height: 24),
+
+          // ── 8. Listening streaks ──────────────────────────────────────────
+          if (_calendarData != null && _calendarData!.isNotEmpty) ...[
+            _SectionHeader(
+              title: _ct('Séries d\'écoute', 'Listening streaks'),
+              icon: Icons.local_fire_department_rounded,
+            ),
+            const SizedBox(height: 12),
+            _StreakCard(data: _calendarData!),
+            const SizedBox(height: 20),
+          ],
         ],
       ),
       ),
@@ -1009,10 +1042,11 @@ class _CumulativeLineCardState extends State<_CumulativeLineCard> {
                       height: _chartH,
                       child: CustomPaint(
                         painter: _LinePainter(
-                          keys:      keys,
-                          values:    vals,
-                          color:     s.primary,
-                          gridColor: s.outlineVariant.withValues(alpha: 0.35),
+                          keys:          keys,
+                          values:        vals,
+                          color:         s.primary,
+                          gridColor:     s.outlineVariant.withValues(alpha: 0.35),
+                          dotInnerColor: s.surface,
                         ),
                       ),
                     ),
@@ -1056,11 +1090,13 @@ class _LinePainter extends CustomPainter {
   final List<double> values;
   final Color        color;
   final Color        gridColor;
+  final Color        dotInnerColor; // use theme surface, not hardcoded white
   const _LinePainter({
     required this.keys,
     required this.values,
     required this.color,
     required this.gridColor,
+    required this.dotInnerColor,
   });
 
   @override
@@ -1115,16 +1151,16 @@ class _LinePainter extends CustomPainter {
     // ── Point final ───────────────────────────────────────────────────────
     canvas.drawCircle(pts.last, 6, Paint()..color = color.withValues(alpha: 0.18));
     canvas.drawCircle(pts.last, 3.5, Paint()..color = color);
-    canvas.drawCircle(pts.last, 1.5, Paint()..color = Colors.white);
+    canvas.drawCircle(pts.last, 1.5, Paint()..color = dotInnerColor);
   }
 
   @override
   bool shouldRepaint(_LinePainter old) =>
-      old.values != values || old.color != color;
+      old.values != values || old.color != color || old.dotInnerColor != dotInnerColor;
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-//  _TagsCard
+//  _TagsCard — genre list with gradient bars
 // ══════════════════════════════════════════════════════════════════════════
 
 class _TagsCard extends StatelessWidget {
@@ -1147,27 +1183,54 @@ class _TagsCard extends StatelessWidget {
           final ratio = maxVal > 0 ? e.value.count / maxVal : 0.0;
           final color = palette[e.key % palette.length];
           return Padding(
-            padding: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.only(bottom: 12),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [
-                Container(width: 10, height: 10,
-                    decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+                Container(
+                  width: 8, height: 8,
+                  decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                ),
                 const SizedBox(width: 8),
                 Text(e.value.name,
                     style: t.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
                 const Spacer(),
                 Text('${(ratio * 100).round()}%',
-                    style: t.bodySmall?.copyWith(color: s.onSurfaceVariant)),
+                    style: t.bodySmall?.copyWith(
+                        color: s.onSurfaceVariant, fontSize: 10)),
               ]),
-              const SizedBox(height: 4),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: ratio, minHeight: 7,
-                  backgroundColor: color.withValues(alpha: 0.15),
-                  valueColor: AlwaysStoppedAnimation<Color>(color),
-                ),
-              ),
+              const SizedBox(height: 6),
+              // Gradient bar — theme-aware
+              LayoutBuilder(builder: (_, box) {
+                final barW = box.maxWidth * ratio;
+                return Stack(
+                  children: [
+                    // Background track
+                    Container(
+                      height: 6,
+                      decoration: BoxDecoration(
+                        color: s.surfaceContainerHigh,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                    ),
+                    // Filled bar with gradient
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 500),
+                      curve: Curves.easeOutCubic,
+                      width: barW.clamp(6.0, box.maxWidth),
+                      height: 6,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            color.withValues(alpha: 0.55),
+                            color,
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                    ),
+                  ],
+                );
+              }),
             ]),
           );
         }).toList(),
@@ -1785,6 +1848,334 @@ class _MonthHeatGrid extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  _StreakCard — current & best listening streaks from calendar data
+// ══════════════════════════════════════════════════════════════════════════
+
+// Returns (current streak, best streak, best streak start date)
+({int current, int best, String bestStart}) _computeStreaks(Map<String, int> data) {
+  final today = DateTime.now();
+
+  // Current streak: consecutive days going back from today
+  int current = 0;
+  for (var i = 0; i < 365; i++) {
+    final d   = today.subtract(Duration(days: i));
+    final key = '${d.year}-${d.month.toString().padLeft(2, '0')}'
+                '-${d.day.toString().padLeft(2, '0')}';
+    if ((data[key] ?? 0) > 0) {
+      current++;
+    } else {
+      break;
+    }
+  }
+
+  // Best streak: longest consecutive run in the whole dataset
+  final active = data.keys.where((k) => (data[k] ?? 0) > 0).toList()..sort();
+  int best = 0, run = 0;
+  String bestStart = '', runStart = '';
+  DateTime? prev;
+  for (final k in active) {
+    final d = DateTime.parse(k);
+    if (prev != null && d.difference(prev!).inDays == 1) {
+      run++;
+    } else {
+      run = 1;
+      runStart = k;
+    }
+    if (run > best) {
+      best = run;
+      bestStart = runStart;
+    }
+    prev = d;
+  }
+  return (current: current, best: best, bestStart: bestStart);
+}
+
+class _StreakCard extends StatelessWidget {
+  final Map<String, int> data;
+  const _StreakCard({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final s     = Theme.of(context).colorScheme;
+    final t     = Theme.of(context).textTheme;
+    final str   = _computeStreaks(data);
+    final ratio = str.best > 0 ? (str.current / str.best).clamp(0.0, 1.0) : 0.0;
+
+    return Container(
+      decoration: _chartCardDecoration(s),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Two stat tiles: current / best
+          Row(children: [
+            Expanded(
+              child: _StreakTile(
+                icon: '🔥',
+                label: _ct('Série actuelle', 'Current streak'),
+                value: '${str.current}',
+                unit: _ct('j', 'd'),
+                color: s.primary,
+                s: s, t: t,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _StreakTile(
+                icon: '🏆',
+                label: _ct('Meilleure série', 'Best streak'),
+                value: '${str.best}',
+                unit: _ct('j', 'd'),
+                color: s.tertiary,
+                s: s, t: t,
+              ),
+            ),
+          ]),
+          const SizedBox(height: 14),
+          // Progress bar: current vs best
+          Row(children: [
+            Text(
+              '0',
+              style: t.labelSmall?.copyWith(
+                  fontSize: 9, color: s.onSurfaceVariant.withValues(alpha: 0.5)),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Stack(
+                  children: [
+                    Container(
+                      height: 6,
+                      decoration: BoxDecoration(
+                        color: s.surfaceContainerHigh,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                    ),
+                    FractionallySizedBox(
+                      widthFactor: ratio,
+                      child: Container(
+                        height: 6,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [s.primary.withValues(alpha: 0.5), s.primary],
+                          ),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Text(
+              '${str.best}${_ct('j', 'd')}',
+              style: t.labelSmall?.copyWith(
+                  fontSize: 9, color: s.onSurfaceVariant.withValues(alpha: 0.5)),
+            ),
+          ]),
+          if (str.bestStart.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              _ct('Meilleure série depuis le ${str.bestStart}',
+                  'Best streak started on ${str.bestStart}'),
+              style: t.labelSmall?.copyWith(
+                  fontSize: 9, color: s.onSurfaceVariant.withValues(alpha: 0.6)),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// Small tile inside _StreakCard
+class _StreakTile extends StatelessWidget {
+  final String icon, label, value, unit;
+  final Color  color;
+  final ColorScheme s;
+  final TextTheme   t;
+  const _StreakTile({
+    required this.icon, required this.label, required this.value,
+    required this.unit, required this.color, required this.s, required this.t,
+  });
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.10),
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: color.withValues(alpha: 0.18), width: 1),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(icon, style: const TextStyle(fontSize: 18)),
+        const SizedBox(height: 6),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(value,
+                style: t.headlineSmall?.copyWith(
+                    color: color, fontWeight: FontWeight.w800, height: 1)),
+            const SizedBox(width: 3),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Text(unit,
+                  style: t.labelMedium?.copyWith(
+                      color: color.withValues(alpha: 0.7))),
+            ),
+          ],
+        ),
+        const SizedBox(height: 2),
+        Text(label,
+            style: t.labelSmall?.copyWith(
+                color: s.onSurfaceVariant, fontSize: 9)),
+      ],
+    ),
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  _TopHorizontalBarCard — ranked horizontal bars (artists or albums)
+// ══════════════════════════════════════════════════════════════════════════
+
+class _TopHorizontalBarCard extends StatelessWidget {
+  final List<dynamic>            items;
+  final String Function(dynamic) getLabel;
+  final int    Function(dynamic) getPlays;
+  final Color                    barColor;
+  final void   Function(dynamic) onTap;
+  const _TopHorizontalBarCard({
+    required this.items,
+    required this.getLabel,
+    required this.getPlays,
+    required this.barColor,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final s      = Theme.of(context).colorScheme;
+    final t      = Theme.of(context).textTheme;
+    final vals   = items.map(getPlays).toList();
+    final maxVal = vals.isEmpty ? 1 : vals.reduce((a, b) => a > b ? a : b);
+    final total  = vals.fold<int>(0, (a, b) => a + b);
+
+    return Container(
+      decoration: _chartCardDecoration(s),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: items.asMap().entries.map((e) {
+          final plays = getPlays(e.value);
+          final ratio = maxVal > 0 ? plays / maxVal : 0.0;
+          final rank  = e.key + 1;
+          // Highlight top 3 with full color, rest faded
+          final color = rank <= 3
+              ? barColor
+              : Color.lerp(s.surfaceContainerHigh, barColor, 0.6)!;
+
+          return GestureDetector(
+            onTap: () => onTap(e.value),
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(
+                children: [
+                  // Rank number
+                  SizedBox(
+                    width: 20,
+                    child: Text(
+                      '$rank',
+                      style: t.labelSmall?.copyWith(
+                        color: rank <= 3
+                            ? barColor
+                            : s.onSurfaceVariant.withValues(alpha: 0.5),
+                        fontWeight: rank <= 3
+                            ? FontWeight.w800 : FontWeight.w500,
+                        fontSize: rank == 1 ? 12 : 10,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(children: [
+                          Expanded(
+                            child: Text(
+                              getLabel(e.value),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: t.bodySmall?.copyWith(
+                                fontWeight: rank <= 3
+                                    ? FontWeight.w700 : FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            _fmt(plays),
+                            style: t.labelSmall?.copyWith(
+                              color: rank <= 3
+                                  ? barColor
+                                  : s.onSurfaceVariant,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 10,
+                            ),
+                          ),
+                          if (total > 0) ...[
+                            const SizedBox(width: 4),
+                            Text(
+                              '${(plays / total * 100).round()}%',
+                              style: t.labelSmall?.copyWith(
+                                  color: s.onSurfaceVariant.withValues(alpha: 0.55),
+                                  fontSize: 9),
+                            ),
+                          ],
+                        ]),
+                        const SizedBox(height: 4),
+                        // Horizontal gradient bar
+                        Stack(
+                          children: [
+                            Container(
+                              height: 4,
+                              decoration: BoxDecoration(
+                                color: s.surfaceContainerHigh,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                            ),
+                            FractionallySizedBox(
+                              widthFactor: ratio,
+                              child: Container(
+                                height: 4,
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [
+                                      color.withValues(alpha: 0.45),
+                                      color,
+                                    ],
+                                  ),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }).toList(),
+      ),
     );
   }
 }
