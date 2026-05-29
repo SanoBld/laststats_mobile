@@ -646,24 +646,13 @@ class _ChartsPageState extends State<_ChartsPage>
             Text(_ct('All-time', 'All-time'),
                 style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
             const SizedBox(height: 12),
-            _DonutDistributionCard(
-              items:      _topArtists,
-              getLabel:   (e) => (e['name'] ?? '').toString(),
-              getPlays:   (e) =>
+            _SwipeDistributionCard(
+              items:       _topArtists,
+              getLabel:    (e) => (e['name'] ?? '').toString(),
+              getPlays:    (e) =>
                   int.tryParse((e['playcount'] ?? '0').toString()) ?? 0,
-              baseColor:  scheme.primary,
+              baseColor:   scheme.primary,
               secondColor: scheme.tertiary,
-              onTap: (e) => showDetailSheet(context,
-                  Map<String, dynamic>.from(e as Map), 'artists', widget.service),
-            ),
-            const SizedBox(height: 12),
-            // Horizontal ranked bars — complementary view
-            _TopHorizontalBarCard(
-              items:    _topArtists,
-              getLabel: (e) => (e['name'] ?? '').toString(),
-              getPlays: (e) =>
-                  int.tryParse((e['playcount'] ?? '0').toString()) ?? 0,
-              barColor: scheme.primary,
               onTap: (e) => showDetailSheet(context,
                   Map<String, dynamic>.from(e as Map), 'artists', widget.service),
             ),
@@ -680,24 +669,13 @@ class _ChartsPageState extends State<_ChartsPage>
             Text(_ct('All-time', 'All-time'),
                 style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
             const SizedBox(height: 12),
-            _DonutDistributionCard(
-              items:      _topAlbums,
-              getLabel:   (e) => (e['name'] ?? '').toString(),
-              getPlays:   (e) =>
+            _SwipeDistributionCard(
+              items:       _topAlbums,
+              getLabel:    (e) => (e['name'] ?? '').toString(),
+              getPlays:    (e) =>
                   int.tryParse((e['playcount'] ?? '0').toString()) ?? 0,
-              baseColor:  scheme.secondary,
+              baseColor:   scheme.secondary,
               secondColor: scheme.primary,
-              onTap: (e) => showDetailSheet(context,
-                  Map<String, dynamic>.from(e as Map), 'albums', widget.service),
-            ),
-            const SizedBox(height: 12),
-            // Horizontal ranked bars — complementary view
-            _TopHorizontalBarCard(
-              items:    _topAlbums,
-              getLabel: (e) => (e['name'] ?? '').toString(),
-              getPlays: (e) =>
-                  int.tryParse((e['playcount'] ?? '0').toString()) ?? 0,
-              barColor: scheme.secondary,
               onTap: (e) => showDetailSheet(context,
                   Map<String, dynamic>.from(e as Map), 'albums', widget.service),
             ),
@@ -731,6 +709,13 @@ class _ChartsPageState extends State<_ChartsPage>
           else if (_calendarData != null)
             _CalendarCard(data: _calendarData!, year: _selectedYear,
                 fullYear: hasFullData),
+          const SizedBox(height: 12),
+          // Continuous full-year heatmap (no month separation)
+          if (!_calendarLoading && _calendarData != null)
+            _YearFullHeatmapCard(
+              data: _calendarData!,
+              year: _selectedYear,
+            ),
           const SizedBox(height: 24),
 
           // ── 8. Listening streaks ──────────────────────────────────────────
@@ -2175,6 +2160,268 @@ class _TopHorizontalBarCard extends StatelessWidget {
             ),
           );
         }).toList(),
+      ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  _SwipeDistributionCard — donut ↔ horizontal bars, swipe to switch
+// ══════════════════════════════════════════════════════════════════════════
+
+class _SwipeDistributionCard extends StatefulWidget {
+  final List<dynamic>            items;
+  final String Function(dynamic) getLabel;
+  final int    Function(dynamic) getPlays;
+  final Color                    baseColor;
+  final Color                    secondColor;
+  final void   Function(dynamic) onTap;
+  const _SwipeDistributionCard({
+    required this.items,
+    required this.getLabel,
+    required this.getPlays,
+    required this.baseColor,
+    required this.secondColor,
+    required this.onTap,
+  });
+
+  @override
+  State<_SwipeDistributionCard> createState() => _SwipeDistributionCardState();
+}
+
+class _SwipeDistributionCardState extends State<_SwipeDistributionCard> {
+  final _ctrl = PageController();
+  int _page = 0;
+
+  @override
+  void dispose() { _ctrl.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = Theme.of(context).colorScheme;
+    final t = Theme.of(context).textTheme;
+
+    // Height must cover both views — horizontal bars for 10 items is tallest
+    final itemH = widget.items.length * 46.0 + 32.0;
+    const donutH = 200.0 + 32.0;
+    final cardH = itemH > donutH ? itemH : donutH;
+
+    return Column(
+      children: [
+        SizedBox(
+          height: cardH,
+          child: PageView(
+            controller: _ctrl,
+            onPageChanged: (i) => setState(() => _page = i),
+            children: [
+              // Page 0: donut
+              _DonutDistributionCard(
+                items:       widget.items,
+                getLabel:    widget.getLabel,
+                getPlays:    widget.getPlays,
+                baseColor:   widget.baseColor,
+                secondColor: widget.secondColor,
+                onTap:       widget.onTap,
+              ),
+              // Page 1: horizontal ranked bars
+              _TopHorizontalBarCard(
+                items:    widget.items,
+                getLabel: widget.getLabel,
+                getPlays: widget.getPlays,
+                barColor: widget.baseColor,
+                onTap:    widget.onTap,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        // Page dots + swipe hint
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              _ct('← glisser', '← swipe'),
+              style: t.labelSmall?.copyWith(
+                  fontSize: 9,
+                  color: s.onSurfaceVariant.withValues(alpha: 0.4)),
+            ),
+            const SizedBox(width: 10),
+            ...List.generate(2, (i) => AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width:  _page == i ? 16 : 6,
+              height: 6,
+              margin: const EdgeInsets.symmetric(horizontal: 3),
+              decoration: BoxDecoration(
+                color: _page == i
+                    ? widget.baseColor
+                    : s.outlineVariant,
+                borderRadius: BorderRadius.circular(3),
+              ),
+            )),
+            const SizedBox(width: 10),
+            Text(
+              _ct('glisser →', 'swipe →'),
+              style: t.labelSmall?.copyWith(
+                  fontSize: 9,
+                  color: s.onSurfaceVariant.withValues(alpha: 0.4)),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  _YearFullHeatmapCard — continuous GitHub-style year heatmap
+// ══════════════════════════════════════════════════════════════════════════
+
+class _YearFullHeatmapCard extends StatelessWidget {
+  final Map<String, int> data;
+  final int              year;
+  const _YearFullHeatmapCard({required this.data, required this.year});
+
+  static const _cell = 11.0; // cell size
+  static const _gap  = 2.0;  // gap between cells
+  static const _step = _cell + _gap; // 13px per cell
+
+  @override
+  Widget build(BuildContext context) {
+    final s      = Theme.of(context).colorScheme;
+    final t      = Theme.of(context).textTheme;
+    final maxVal = data.values.fold(0, (a, b) => a > b ? a : b);
+
+    // Build week columns starting from Jan 1
+    final jan1     = DateTime(year, 1, 1);
+    final startWd  = jan1.weekday; // 1=Mon … 7=Sun
+    final totalDays = DateTime(year, 12, 31).difference(jan1).inDays + 1;
+
+    // Number of week columns needed
+    final totalCells = (startWd - 1) + totalDays;
+    final weeks      = (totalCells / 7).ceil();
+    final totalW     = weeks * _step - _gap;
+
+    // Month label positions (week index where each month starts)
+    final monthLabels = <MapEntry<int, String>>[];
+    for (var m = 1; m <= 12; m++) {
+      final d   = DateTime(year, m, 1);
+      final off = d.difference(jan1).inDays + (startWd - 1);
+      monthLabels.add(MapEntry(off ~/ 7, L.months[m]));
+    }
+
+    return Container(
+      decoration: _chartCardDecoration(s),
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            child: SizedBox(
+              width: totalW,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Month labels row
+                  SizedBox(
+                    height: 14,
+                    child: Stack(
+                      children: monthLabels.map((e) => Positioned(
+                        left: e.key * _step,
+                        child: Text(
+                          e.value,
+                          style: t.labelSmall?.copyWith(
+                            fontSize: 8,
+                            color: s.onSurfaceVariant.withValues(alpha: 0.7),
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      )).toList(),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  // Grid: 7 rows × n weeks
+                  SizedBox(
+                    height: 7 * _step - _gap,
+                    child: Stack(
+                      children: List.generate(weeks * 7, (idx) {
+                        final col = idx ~/ 7;
+                        final row = idx  %  7;
+                        final dayOffset = col * 7 + row - (startWd - 1);
+
+                        // Skip padding cells before Jan 1
+                        if (dayOffset < 0 || dayOffset >= totalDays) {
+                          return const SizedBox.shrink();
+                        }
+
+                        final d     = jan1.add(Duration(days: dayOffset));
+                        final key   = '${d.year}-'
+                            '${d.month.toString().padLeft(2, '0')}-'
+                            '${d.day.toString().padLeft(2, '0')}';
+                        final count = data[key] ?? 0;
+                        final ratio = (maxVal > 0 && count > 0)
+                            ? count / maxVal
+                            : 0.0;
+                        final scaledRatio = ratio > 0
+                            ? sqrt(ratio).clamp(0.0, 1.0)
+                            : 0.0;
+                        final color = count == 0
+                            ? s.surfaceContainerHigh
+                            : Color.lerp(
+                                s.primaryContainer, s.primary,
+                                (scaledRatio * 0.85 + 0.15).clamp(0.0, 1.0))!;
+
+                        return Positioned(
+                          left: col * _step,
+                          top:  row * _step,
+                          child: Tooltip(
+                            message: count > 0
+                                ? '${d.day}/${d.month} — $count scrobbles'
+                                : '',
+                            child: Container(
+                              width: _cell,
+                              height: _cell,
+                              decoration: BoxDecoration(
+                                color: color,
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                          ),
+                        );
+                      }),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          // Legend + scroll hint
+          Row(children: [
+            _scrollHint(context),
+            const Spacer(),
+            Text(_ct('Moins', 'Less'),
+                style: t.labelSmall?.copyWith(
+                    fontSize: 9, color: s.onSurfaceVariant)),
+            const SizedBox(width: 4),
+            ...List.generate(5, (i) => Container(
+              width: 10, height: 10,
+              margin: const EdgeInsets.only(right: 2),
+              decoration: BoxDecoration(
+                color: i == 0
+                    ? s.surfaceContainerHigh
+                    : Color.lerp(s.primaryContainer, s.primary,
+                        (i / 4).clamp(0.0, 1.0)),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            )),
+            const SizedBox(width: 4),
+            Text(_ct('Plus', 'More'),
+                style: t.labelSmall?.copyWith(
+                    fontSize: 9, color: s.onSurfaceVariant)),
+          ]),
+        ],
       ),
     );
   }
