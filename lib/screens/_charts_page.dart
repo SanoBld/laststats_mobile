@@ -2196,46 +2196,56 @@ class _SwipeDistributionCardState extends State<_SwipeDistributionCard> {
   @override
   void dispose() { _ctrl.dispose(); super.dispose(); }
 
+  // Compute height for each page so the card never has dead space
+  double _donutHeight() {
+    // Donut is 130px, legend ~20px per item; card padding 32px total
+    final legendH = widget.items.length * 20.0;
+    return (legendH > 130 ? legendH : 130) + 32;
+  }
+
+  double _barsHeight() {
+    // Each row: label(14) + gap(4) + bar(4) + bottom padding(10) = 32px + card padding 32px
+    return widget.items.length * 32.0 + 32;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final s = Theme.of(context).colorScheme;
-    final t = Theme.of(context).textTheme;
-
-    // Height must cover both views — horizontal bars for 10 items is tallest
-    final itemH = widget.items.length * 46.0 + 32.0;
-    const donutH = 200.0 + 32.0;
-    final cardH = itemH > donutH ? itemH : donutH;
+    final s      = Theme.of(context).colorScheme;
+    final t      = Theme.of(context).textTheme;
+    final height = _page == 0 ? _donutHeight() : _barsHeight();
 
     return Column(
       children: [
-        SizedBox(
-          height: cardH,
-          child: PageView(
-            controller: _ctrl,
-            onPageChanged: (i) => setState(() => _page = i),
-            children: [
-              // Page 0: donut
-              _DonutDistributionCard(
-                items:       widget.items,
-                getLabel:    widget.getLabel,
-                getPlays:    widget.getPlays,
-                baseColor:   widget.baseColor,
-                secondColor: widget.secondColor,
-                onTap:       widget.onTap,
-              ),
-              // Page 1: horizontal ranked bars
-              _TopHorizontalBarCard(
-                items:    widget.items,
-                getLabel: widget.getLabel,
-                getPlays: widget.getPlays,
-                barColor: widget.baseColor,
-                onTap:    widget.onTap,
-              ),
-            ],
+        AnimatedSize(
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeInOut,
+          child: SizedBox(
+            height: height,
+            child: PageView(
+              controller: _ctrl,
+              onPageChanged: (i) => setState(() => _page = i),
+              children: [
+                _DonutDistributionCard(
+                  items:       widget.items,
+                  getLabel:    widget.getLabel,
+                  getPlays:    widget.getPlays,
+                  baseColor:   widget.baseColor,
+                  secondColor: widget.secondColor,
+                  onTap:       widget.onTap,
+                ),
+                _TopHorizontalBarCard(
+                  items:    widget.items,
+                  getLabel: widget.getLabel,
+                  getPlays: widget.getPlays,
+                  barColor: widget.baseColor,
+                  onTap:    widget.onTap,
+                ),
+              ],
+            ),
           ),
         ),
         const SizedBox(height: 10),
-        // Page dots + swipe hint
+        // Dots + swipe hint
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -2252,9 +2262,7 @@ class _SwipeDistributionCardState extends State<_SwipeDistributionCard> {
               height: 6,
               margin: const EdgeInsets.symmetric(horizontal: 3),
               decoration: BoxDecoration(
-                color: _page == i
-                    ? widget.baseColor
-                    : s.outlineVariant,
+                color: _page == i ? widget.baseColor : s.outlineVariant,
                 borderRadius: BorderRadius.circular(3),
               ),
             )),
@@ -2281,9 +2289,9 @@ class _YearFullHeatmapCard extends StatelessWidget {
   final int              year;
   const _YearFullHeatmapCard({required this.data, required this.year});
 
-  static const _cell = 11.0; // cell size
-  static const _gap  = 2.0;  // gap between cells
-  static const _step = _cell + _gap; // 13px per cell
+  static const _cell = 11.0;
+  static const _gap  = 2.0;
+  static const _step = _cell + _gap;
 
   @override
   Widget build(BuildContext context) {
@@ -2291,22 +2299,27 @@ class _YearFullHeatmapCard extends StatelessWidget {
     final t      = Theme.of(context).textTheme;
     final maxVal = data.values.fold(0, (a, b) => a > b ? a : b);
 
-    // Build week columns starting from Jan 1
-    final jan1     = DateTime(year, 1, 1);
-    final startWd  = jan1.weekday; // 1=Mon … 7=Sun
+    final jan1      = DateTime(year, 1, 1);
+    final startWd   = jan1.weekday; // 1=Mon … 7=Sun
     final totalDays = DateTime(year, 12, 31).difference(jan1).inDays + 1;
-
-    // Number of week columns needed
     final totalCells = (startWd - 1) + totalDays;
     final weeks      = (totalCells / 7).ceil();
-    final totalW     = weeks * _step - _gap;
 
-    // Month label positions (week index where each month starts)
-    final monthLabels = <MapEntry<int, String>>[];
+    // Build per-week list of 7 day-offsets (null = padding cell)
+    final weekColumns = List.generate(weeks, (col) {
+      return List.generate(7, (row) {
+        final offset = col * 7 + row - (startWd - 1);
+        if (offset < 0 || offset >= totalDays) return null;
+        return offset;
+      });
+    });
+
+    // Month label: first week index where each month starts
+    final monthStarts = <int, String>{};
     for (var m = 1; m <= 12; m++) {
       final d   = DateTime(year, m, 1);
       final off = d.difference(jan1).inDays + (startWd - 1);
-      monthLabels.add(MapEntry(off ~/ 7, L.months[m]));
+      monthStarts[off ~/ 7] = L.months[m];
     }
 
     return Container(
@@ -2318,63 +2331,52 @@ class _YearFullHeatmapCard extends StatelessWidget {
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             physics: const BouncingScrollPhysics(),
-            child: SizedBox(
-              width: totalW,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Month labels row
-                  SizedBox(
-                    height: 14,
-                    child: Stack(
-                      children: monthLabels.map((e) => Positioned(
-                        left: e.key * _step,
-                        child: Text(
-                          e.value,
-                          style: t.labelSmall?.copyWith(
-                            fontSize: 8,
-                            color: s.onSurfaceVariant.withValues(alpha: 0.7),
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      )).toList(),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  // Grid: 7 rows × n weeks
-                  SizedBox(
-                    height: 7 * _step - _gap,
-                    child: Stack(
-                      children: List.generate(weeks * 7, (idx) {
-                        final col = idx ~/ 7;
-                        final row = idx  %  7;
-                        final dayOffset = col * 7 + row - (startWd - 1);
-
-                        // Skip padding cells before Jan 1
-                        if (dayOffset < 0 || dayOffset >= totalDays) {
-                          return const SizedBox.shrink();
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: weekColumns.asMap().entries.map((entry) {
+                final col  = entry.key;
+                final days = entry.value;
+                return Padding(
+                  padding: const EdgeInsets.only(right: _gap),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Month label (or empty space)
+                      SizedBox(
+                        height: 14,
+                        child: monthStarts.containsKey(col)
+                            ? Text(
+                                monthStarts[col]!,
+                                style: t.labelSmall?.copyWith(
+                                  fontSize: 8,
+                                  color: s.onSurfaceVariant.withValues(alpha: 0.7),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              )
+                            : null,
+                      ),
+                      const SizedBox(height: 2),
+                      // 7 day cells
+                      ...days.map((offset) {
+                        if (offset == null) {
+                          return SizedBox(width: _cell, height: _cell + _gap);
                         }
-
-                        final d     = jan1.add(Duration(days: dayOffset));
-                        final key   = '${d.year}-'
+                        final d   = jan1.add(Duration(days: offset));
+                        final key = '${d.year}-'
                             '${d.month.toString().padLeft(2, '0')}-'
                             '${d.day.toString().padLeft(2, '0')}';
                         final count = data[key] ?? 0;
                         final ratio = (maxVal > 0 && count > 0)
-                            ? count / maxVal
-                            : 0.0;
-                        final scaledRatio = ratio > 0
-                            ? sqrt(ratio).clamp(0.0, 1.0)
-                            : 0.0;
+                            ? count / maxVal : 0.0;
+                        final scaled = ratio > 0
+                            ? sqrt(ratio).clamp(0.0, 1.0) : 0.0;
                         final color = count == 0
                             ? s.surfaceContainerHigh
                             : Color.lerp(
                                 s.primaryContainer, s.primary,
-                                (scaledRatio * 0.85 + 0.15).clamp(0.0, 1.0))!;
-
-                        return Positioned(
-                          left: col * _step,
-                          top:  row * _step,
+                                (scaled * 0.85 + 0.15).clamp(0.0, 1.0))!;
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: _gap),
                           child: Tooltip(
                             message: count > 0
                                 ? '${d.day}/${d.month} — $count scrobbles'
@@ -2390,14 +2392,13 @@ class _YearFullHeatmapCard extends StatelessWidget {
                           ),
                         );
                       }),
-                    ),
+                    ],
                   ),
-                ],
-              ),
+                );
+              }).toList(),
             ),
           ),
           const SizedBox(height: 8),
-          // Legend + scroll hint
           Row(children: [
             _scrollHint(context),
             const Spacer(),
