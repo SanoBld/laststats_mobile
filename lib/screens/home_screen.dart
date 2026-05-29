@@ -25,6 +25,7 @@ import '../services/all_scrobbles_service.dart';
 
 // ── Settings sub-pages ────────────────────────────────────────────────────────
 import 'settings/appearance_page.dart';
+import 'settings/notifications_page.dart';      // notification preferences
 import 'settings/dashboard_settings_page.dart';
 import 'settings/startup_page.dart';
 import 'settings/language_page.dart';
@@ -201,9 +202,8 @@ class _HomeScreenState extends State<HomeScreen> {
     _HistoryPage(service: _service),
   ];
 
-  /// The page stack is shared between both layouts: every page is always kept
-  /// in the widget tree (preserving scroll position and loaded data), and only
-  /// the selected one is visible through AnimatedOpacity.
+  /// Every page stays in the tree (preserving state/scroll/data).
+  /// Only the selected one is visible via AnimatedOpacity.
   Widget _pageStack(List<Widget> pages) {
     return Stack(
       children: List.generate(pages.length, (i) => IgnorePointer(
@@ -244,7 +244,7 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             // ── Side rail ─────────────────────────────────────────────────
             NavigationRail(
-              selectedIndex:        _idx,
+              selectedIndex:         _idx,
               onDestinationSelected: (i) => setState(() => _idx = i),
 
               // Extended rail (labels inline, wider) above 1200 dp.
@@ -255,11 +255,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   ? NavigationRailLabelType.none
                   : NavigationRailLabelType.all,
 
-              // Increase the minimum width so labels aren't clipped.
+              // Enough width so labels are never clipped.
               minWidth:         72,
               minExtendedWidth: 200,
 
-              // Leading: app logo / title when the rail is extended.
+              // Leading: full logo when extended, icon only when compact.
               leading: extended
                   ? Padding(
                       padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
@@ -269,9 +269,9 @@ class _HomeScreenState extends State<HomeScreen> {
                         const SizedBox(width: 10),
                         Text('LastStats',
                             style: TextStyle(
-                              color:      scheme.primary,
-                              fontSize:   16,
-                              fontWeight: FontWeight.w800,
+                              color:         scheme.primary,
+                              fontSize:      16,
+                              fontWeight:    FontWeight.w800,
                               letterSpacing: 0.2,
                             )),
                       ]),

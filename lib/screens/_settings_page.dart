@@ -2,11 +2,8 @@
 // lib/screens/_settings_page.dart
 // ══════════════════════════════════════════════════════════════════════════
 //  Settings tab — navigation hub to sub-pages.
-//  All options are grouped by theme in dedicated pages.
 // ══════════════════════════════════════════════════════════════════════════
 part of 'home_screen.dart';
-
-// ── Card data model ───────────────────────────────────────────────────────────
 
 class _SettingsCardData {
   final IconData icon;
@@ -25,8 +22,6 @@ class _SettingsCardData {
     required this.pageBuilder,
   });
 }
-
-// ── Main settings page (hub) ──────────────────────────────────────────────────
 
 class _SettingsPage extends StatefulWidget {
   final String username;
@@ -75,16 +70,18 @@ class _SettingsPageState extends State<_SettingsPage> {
   }
 
   List<_SettingsCardData> _buildCards() => [
+    // 0 — Appearance
     _SettingsCardData(
       icon: Icons.palette_rounded,
       iconBgColor: (s) => s.primaryContainer,
       iconFgColor: (s) => s.onPrimaryContainer,
       title:    () => L.settingsAppearance,
       subtitle: () => localeNotifier.value == 'en'
-          ? 'Theme, accent color, Material You'
-          : 'Thème, couleur d\'accent, Material You',
+          ? 'Theme, accent, layout, Material You'
+          : 'Thème, accent, disposition, Material You',
       pageBuilder: (_) => const AppearancePage(),
     ),
+    // 1 — Dashboard
     _SettingsCardData(
       icon: Icons.dashboard_rounded,
       iconBgColor: (s) => s.secondaryContainer,
@@ -95,6 +92,7 @@ class _SettingsPageState extends State<_SettingsPage> {
           : 'Image d\'en-tête, sections visibles, cartes de stats',
       pageBuilder: (_) => const DashboardSettingsPage(),
     ),
+    // 2 — Startup
     _SettingsCardData(
       icon: Icons.rocket_launch_rounded,
       iconBgColor: (s) => s.tertiaryContainer,
@@ -105,6 +103,18 @@ class _SettingsPageState extends State<_SettingsPage> {
           : 'Onglet affiché au démarrage',
       pageBuilder: (_) => const StartupPage(),
     ),
+    // 3 — Notifications (NEW)
+    _SettingsCardData(
+      icon: Icons.notifications_rounded,
+      iconBgColor: (s) => Color.lerp(s.primaryContainer, s.tertiaryContainer, 0.5)!,
+      iconFgColor: (s) => s.onPrimaryContainer,
+      title:    () => localeNotifier.value == 'en' ? 'Notifications' : 'Notifications',
+      subtitle: () => localeNotifier.value == 'en'
+          ? 'Milestones, daily & weekly recaps'
+          : 'Jalons, récaps quotidiens & hebdo',
+      pageBuilder: (_) => const NotificationsPage(),
+    ),
+    // 4 — Language
     _SettingsCardData(
       icon: Icons.translate_rounded,
       iconBgColor: (s) => Color.lerp(s.primaryContainer, s.secondaryContainer, 0.5)!,
@@ -115,6 +125,7 @@ class _SettingsPageState extends State<_SettingsPage> {
           : 'Français · English',
       pageBuilder: (_) => const LanguagePage(),
     ),
+    // 5 — Account
     _SettingsCardData(
       icon: Icons.person_rounded,
       iconBgColor: (s) => s.primaryContainer,
@@ -125,6 +136,7 @@ class _SettingsPageState extends State<_SettingsPage> {
           : 'Profil Last.fm connecté, déconnexion',
       pageBuilder: (u) => AccountPage(username: u),
     ),
+    // 6 — Cache
     _SettingsCardData(
       icon: Icons.storage_rounded,
       iconBgColor: (s) => Color.lerp(s.primaryContainer, s.tertiaryContainer, 0.5)!,
@@ -135,6 +147,7 @@ class _SettingsPageState extends State<_SettingsPage> {
           : 'Historique, images, données API',
       pageBuilder: (_) => const CachePage(),
     ),
+    // 7 — Backup
     _SettingsCardData(
       icon: Icons.backup_rounded,
       iconBgColor: (s) => s.secondaryContainer,
@@ -145,6 +158,7 @@ class _SettingsPageState extends State<_SettingsPage> {
           : 'Exporter et restaurer vos paramètres',
       pageBuilder: (_) => const BackupPage(),
     ),
+    // 8 — Updates
     _SettingsCardData(
       icon: Icons.system_update_rounded,
       iconBgColor: (s) => s.tertiaryContainer,
@@ -155,6 +169,7 @@ class _SettingsPageState extends State<_SettingsPage> {
           : 'Vérifier les nouvelles versions',
       pageBuilder: (_) => const UpdatesPage(),
     ),
+    // 9 — About
     _SettingsCardData(
       icon: Icons.info_outline_rounded,
       iconBgColor: (s) => Color.lerp(s.tertiaryContainer, s.surface, 0.4)!,
@@ -186,7 +201,7 @@ class _SettingsPageState extends State<_SettingsPage> {
                   style: text.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
               const SizedBox(height: 16),
 
-              // Compact profile card
+              // Profile card
               GestureDetector(
                 onTap: () => _push(context, AccountPage(username: widget.username)),
                 child: Container(
@@ -214,21 +229,17 @@ class _SettingsPageState extends State<_SettingsPage> {
                   ]),
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
 
-              // ── PC / Desktop layout mode ──────────────────────────────
-              _PcModeCard(isEn: isEn),
-              const SizedBox(height: 12),
-
-              // Update available banner
+              // Update banner
               if (_updateInfo != null)
                 _UpdateBanner(
                   info: _updateInfo!,
                   onTap: () => _push(context, const UpdatesPage()),
                 ),
-              if (_updateInfo != null) const SizedBox(height: 12),
+              if (_updateInfo != null) const SizedBox(height: 16),
 
-              // "Restart required" notice
+              // Restart notice
               const _RestartNotice(),
               const SizedBox(height: 20),
             ]),
@@ -242,7 +253,8 @@ class _SettingsPageState extends State<_SettingsPage> {
                 (ctx, i) => _CategoryCard(
                   data:     cards[i],
                   username: widget.username,
-                  badge:    (i == 6 && _updateInfo != null) ? '!' : null,
+                  // Badge on Updates card (index 8)
+                  badge: (i == 8 && _updateInfo != null) ? '!' : null,
                   onTap: () => _push(ctx, cards[i].pageBuilder(widget.username)),
                 ),
                 childCount: cards.length,
@@ -267,7 +279,8 @@ class _SettingsPageState extends State<_SettingsPage> {
               if (_checkingUpdate) ...[
                 const SizedBox(height: 6),
                 Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  SizedBox(width: 10, height: 10, child: CircularProgressIndicator(strokeWidth: 1.5, color: scheme.onSurfaceVariant)),
+                  SizedBox(width: 10, height: 10, child: CircularProgressIndicator(
+                      strokeWidth: 1.5, color: scheme.onSurfaceVariant)),
                   const SizedBox(width: 6),
                   Text(isEn ? 'Checking for updates…' : 'Vérification des mises à jour…',
                       style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
@@ -281,155 +294,8 @@ class _SettingsPageState extends State<_SettingsPage> {
     );
   }
 
-  void _push(BuildContext ctx, Widget page) {
-    Navigator.push(ctx, MaterialPageRoute(builder: (_) => page));
-  }
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-//  PC / Desktop layout mode card
-// ══════════════════════════════════════════════════════════════════════════════
-
-class _PcModeCard extends StatefulWidget {
-  final bool isEn;
-  const _PcModeCard({required this.isEn});
-
-  @override
-  State<_PcModeCard> createState() => _PcModeCardState();
-}
-
-class _PcModeCardState extends State<_PcModeCard> {
-  String _mode = pcModeNotifier.value;
-
-  @override
-  void initState() {
-    super.initState();
-    pcModeNotifier.addListener(_sync);
-  }
-
-  @override
-  void dispose() {
-    pcModeNotifier.removeListener(_sync);
-    super.dispose();
-  }
-
-  void _sync() => setState(() => _mode = pcModeNotifier.value);
-
-  Future<void> _update(String newMode) async {
-    pcModeNotifier.value = newMode;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('ls_pc_mode', newMode);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final text   = Theme.of(context).textTheme;
-    final isEn   = widget.isEn;
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color:        scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-            color: scheme.outlineVariant.withValues(alpha: 0.45)),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        // ── Header ─────────────────────────────────────────────────────
-        Row(children: [
-          Container(
-            width: 38, height: 38,
-            decoration: BoxDecoration(
-              color: scheme.secondaryContainer,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(Icons.desktop_windows_outlined,
-                color: scheme.onSecondaryContainer, size: 20),
-          ),
-          const SizedBox(width: 12),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(
-              isEn ? 'Navigation layout' : 'Disposition de navigation',
-              style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            Text(
-              isEn
-                  ? 'Side rail on wide screens, bottom bar on mobile'
-                  : 'Rail latéral sur grand écran, barre bas sur mobile',
-              style: text.bodySmall?.copyWith(
-                  color: scheme.onSurfaceVariant, height: 1.3),
-            ),
-          ])),
-        ]),
-        const SizedBox(height: 14),
-
-        // ── Segmented button ────────────────────────────────────────────
-        // Three segments: Auto / Side rail / Bottom bar
-        SizedBox(
-          width: double.infinity,
-          child: SegmentedButton<String>(
-            segments: [
-              ButtonSegment<String>(
-                value: 'auto',
-                icon:  const Icon(Icons.auto_mode_rounded, size: 16),
-                label: Text(isEn ? 'Auto' : 'Auto'),
-              ),
-              ButtonSegment<String>(
-                value: 'on',
-                icon:  const Icon(Icons.view_sidebar_outlined, size: 16),
-                label: Text(isEn ? 'Side rail' : 'Rail latéral'),
-              ),
-              ButtonSegment<String>(
-                value: 'off',
-                icon:  const Icon(Icons.view_headline_rounded, size: 16),
-                label: Text(isEn ? 'Bottom bar' : 'Barre bas'),
-              ),
-            ],
-            selected: {_mode},
-            onSelectionChanged: (sel) => _update(sel.first),
-            style: SegmentedButton.styleFrom(
-              // Keep the button compact to fit all 3 labels on narrow screens
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              visualDensity: const VisualDensity(vertical: -1),
-            ),
-          ),
-        ),
-        const SizedBox(height: 10),
-
-        // ── Hint line ───────────────────────────────────────────────────
-        Row(children: [
-          Icon(Icons.info_outline_rounded,
-              size: 13, color: scheme.onSurfaceVariant),
-          const SizedBox(width: 6),
-          Expanded(child: Text(
-            _modeHint(isEn),
-            style: text.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant.withValues(alpha: 0.75),
-                height: 1.3),
-          )),
-        ]),
-      ]),
-    );
-  }
-
-  /// Short explanatory hint that adapts to the current selection.
-  String _modeHint(bool isEn) {
-    switch (_mode) {
-      case 'on':
-        return isEn
-            ? 'Side rail always visible. Labels expand above 1200 dp.'
-            : 'Rail latéral toujours visible. Labels étendus au-delà de 1200 dp.';
-      case 'off':
-        return isEn
-            ? 'Bottom navigation bar on all screen sizes.'
-            : 'Barre de navigation basse sur toutes les tailles d\'écran.';
-      default: // 'auto'
-        return isEn
-            ? 'Side rail above 720 dp, bottom bar below.'
-            : 'Rail latéral au-delà de 720 dp, barre basse en dessous.';
-    }
-  }
+  void _push(BuildContext ctx, Widget page) =>
+      Navigator.push(ctx, MaterialPageRoute(builder: (_) => page));
 }
 
 // ── Category card ─────────────────────────────────────────────────────────────
@@ -466,7 +332,6 @@ class _CategoryCard extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           child: Stack(children: [
             Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              // Icon
               Container(
                 width: 44, height: 44,
                 decoration: BoxDecoration(
@@ -476,19 +341,16 @@ class _CategoryCard extends StatelessWidget {
                 child: Icon(data.icon, color: data.iconFgColor(scheme), size: 24),
               ),
               const Spacer(),
-              // Title
               Text(data.title(),
                   maxLines: 1, overflow: TextOverflow.ellipsis,
                   style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w700)),
               const SizedBox(height: 2),
-              // Subtitle
               Text(data.subtitle(),
                   maxLines: 2, overflow: TextOverflow.ellipsis,
                   style: text.bodySmall?.copyWith(
                       color: scheme.onSurfaceVariant, height: 1.3)),
             ]),
 
-            // Notification badge (e.g. update available)
             if (badge != null)
               Positioned(
                 top: 0, right: 0,
@@ -502,7 +364,6 @@ class _CategoryCard extends StatelessWidget {
                 ),
               ),
 
-            // Arrow
             Positioned(
               bottom: 0, right: 0,
               child: Icon(Icons.arrow_forward_ios_rounded,

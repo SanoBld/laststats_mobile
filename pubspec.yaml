@@ -18,6 +18,7 @@ dependencies:
   url_launcher: ^6.3.0
   palette_generator: ^0.3.3
   flutter_local_notifications: ^18.0.0   # Local notifications (scrobble events)
+  workmanager: ^0.5.2                    # Background tasks without the app open
 
 dev_dependencies:
   flutter_test:

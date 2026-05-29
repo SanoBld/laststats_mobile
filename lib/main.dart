@@ -1,23 +1,16 @@
 // lib/main.dart
-// ══════════════════════════════════════════════════════════════════════════
-//  LastStats entry point.
-//
-//  Startup behaviour:
-//    • Credentials present → HomeScreen directly (no loading splash).
-//      Background prefetch is launched from HomeScreen.initState.
-//    • First launch → SetupScreen → _FirstLoadScreen (full import with
-//      detailed progress) → HomeScreen.
-// ══════════════════════════════════════════════════════════════════════════
-
 import 'package:flutter/material.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:workmanager/workmanager.dart';
 import 'app_state.dart';
 import 'screens/setup_screen.dart';
 import 'screens/home_screen.dart';
 import 'services/data_cache.dart';
 import 'services/image_service.dart';
 import 'services/scrobbles_file_cache.dart';
+import 'services/notification_service.dart';
+import 'services/notification_worker.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,29 +20,37 @@ void main() async {
   final apiKey     = prefs.getString('ls_apikey')   ?? '';
   final startupTab = prefs.getInt('ls_startup_tab') ?? 0;
 
-  // ── Appearance settings ─────────────────────────────────────────────────
+  // ── Appearance ──────────────────────────────────────────────────────────
   themeModeNotifier.value          = themeFromString(prefs.getString('ls_theme'));
   accentNotifier.value             = accentFromString(prefs.getString('ls_accent'));
   useDynamicColorNotifier.value    = prefs.getBool('ls_use_dynamic_color')    ?? false;
   useNowPlayingColorNotifier.value = prefs.getBool('ls_use_nowplaying_color') ?? false;
   localeNotifier.value             = prefs.getString('ls_locale') ?? 'fr';
 
-  // ── Layout / PC mode ('auto' | 'on' | 'off') ────────────────────────────
-  // 'auto'  → side rail when width ≥ 720 dp
-  // 'on'    → always side rail
-  // 'off'   → always bottom bar
+  // ── Navigation layout ('auto' | 'on' | 'off') ───────────────────────────
   pcModeNotifier.value = prefs.getString('ls_pc_mode') ?? 'auto';
 
-  // ── Scrobble data cache ─────────────────────────────────────────────────
+  // ── Data caches ─────────────────────────────────────────────────────────
   await DataCache.init();
   await DataCache.clearExpired();
-
-  // ── History file cache (ScrobblesFileCache) ─────────────────────────────
   await ScrobblesFileCache.init();
-  ScrobblesFileCache.pruneExpired(); // non-blocking
-
-  // ── Image cache cleanup (non-blocking) ──────────────────────────────────
+  ScrobblesFileCache.pruneExpired();
   ImageService.pruneExpired();
+
+  // ── Notifications ────────────────────────────────────────────────────────
+  // Init the local notifications plugin (creates Android channels).
+  await NotificationService.init();
+
+  // Init WorkManager with our top-level callback dispatcher.
+  // callbackDispatcher is defined in notification_worker.dart.
+  await Workmanager().initialize(
+    callbackDispatcher,
+    isInDebugMode: false, // set to true to see WorkManager logs in debug builds
+  );
+
+  // Re-register tasks on each cold start so they survive app updates / reboots.
+  // scheduleAll() is a no-op if all notifications are disabled.
+  await NotificationWorker.scheduleAll();
 
   runApp(LastStatsApp(
     username:   username,
@@ -58,9 +59,9 @@ void main() async {
   ));
 }
 
-// ══════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 //  LastStatsApp
-// ══════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 
 class LastStatsApp extends StatelessWidget {
   final String username;
@@ -97,7 +98,6 @@ class LastStatsApp extends StatelessWidget {
                                     seedColor:  accent,
                                     brightness: Brightness.light,
                                   );
-
                         final ColorScheme darkScheme =
                             (useDynamic && darkDynamic != null)
                                 ? darkDynamic.harmonized()
@@ -109,18 +109,9 @@ class LastStatsApp extends StatelessWidget {
                         return MaterialApp(
                           title:                     'LastStats',
                           debugShowCheckedModeBanner: false,
-                          theme: ThemeData(
-                            colorScheme: lightScheme,
-                            useMaterial3: true,
-                          ),
-                          darkTheme: ThemeData(
-                            colorScheme: darkScheme,
-                            useMaterial3: true,
-                          ),
+                          theme:     ThemeData(colorScheme: lightScheme, useMaterial3: true),
+                          darkTheme: ThemeData(colorScheme: darkScheme,  useMaterial3: true),
                           themeMode: mode,
-                          // ── Routing ───────────────────────────────────
-                          // Credentials present → HomeScreen directly.
-                          // Background prefetch is handled by HomeScreen.
                           home: (username.isNotEmpty && apiKey.isNotEmpty)
                               ? HomeScreen(
                                   username:   username,
