@@ -1,4 +1,5 @@
 // lib/main.dart
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -34,23 +35,17 @@ void main() async {
   await DataCache.init();
   await DataCache.clearExpired();
   await ScrobblesFileCache.init();
-  ScrobblesFileCache.pruneExpired();
   ImageService.pruneExpired();
 
-  // ── Notifications ────────────────────────────────────────────────────────
-  // Init the local notifications plugin (creates Android channels).
-  await NotificationService.init();
-
-  // Init WorkManager with our top-level callback dispatcher.
-  // callbackDispatcher is defined in notification_worker.dart.
-  await Workmanager().initialize(
-    callbackDispatcher,
-    isInDebugMode: false, // set to true to see WorkManager logs in debug builds
-  );
-
-  // Re-register tasks on each cold start so they survive app updates / reboots.
-  // scheduleAll() is a no-op if all notifications are disabled.
-  await NotificationWorker.scheduleAll();
+  // ── Notifications & WorkManager (natif uniquement, pas supporté sur web) ──
+  if (!kIsWeb) {
+    await NotificationService.init();
+    await Workmanager().initialize(
+      callbackDispatcher,
+      isInDebugMode: false,
+    );
+    await NotificationWorker.scheduleAll();
+  }
 
   runApp(LastStatsApp(
     username:   username,

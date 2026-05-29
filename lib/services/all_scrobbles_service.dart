@@ -257,7 +257,8 @@ class AllScrobblesService {
       for (var i = 0; i < years.length; i++) {
         final year = years[i];
 
-        // Skip si déjà en cache complet (sauf l'année en cours)
+        // Skip si déjà en cache complet (sauf l'année en cours, qui peut
+        // avoir de nouveaux scrobbles depuis le dernier chargement complet)
         if (!force && isYearCached(year) && isYearComplete(year) &&
             year != currentYear) continue;
 
@@ -405,11 +406,6 @@ class AllScrobblesService {
           await _updateMeta(year);
         }
 
-        // Rafraîchir le TTL de l'année en cours même sans nouveaux scrobbles
-        if (!byYear.containsKey(now.year)) {
-          final cur = getRecordsForYear(now.year);
-          if (cur != null) await ScrobblesFileCache.setYear(now.year, cur);
-        }
       }
 
       _running = false;

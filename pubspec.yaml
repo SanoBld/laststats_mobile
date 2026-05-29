@@ -18,7 +18,8 @@ dependencies:
   url_launcher: ^6.3.0
   palette_generator: ^0.3.3
   flutter_local_notifications: ^18.0.0   # Local notifications (scrobble events)
-  workmanager: ^0.5.2                    # Background tasks without the app open
+  workmanager: ^0.6.0                    # Background tasks without the app open — v0.5.2 incompatible avec Flutter v2 embedding
+  web: ^1.1.0                            # Remplace dart:html (déprécié) pour le backend IndexedDB web
 
 dev_dependencies:
   flutter_test:

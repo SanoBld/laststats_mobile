@@ -2,41 +2,39 @@
 // ══════════════════════════════════════════════════════════════════════════
 //  ScrobblesFileCache — stockage multi-plateforme de l'historique complet
 //
-//  Chaque scrobble est stocké avec ses métadonnées complètes :
-//    timestamp, titre, artiste, album
-//  Format compact (tableau JSON) pour minimiser l'espace disque.
+//  Stratégie de stockage :
+//    • Premier lancement  → AllScrobblesService.loadAll() charge TOUT.
+//    • Lancements suivants → AllScrobblesService.syncNew() ne charge que
+//      les scrobbles postérieurs au dernier timestamp connu.
+//    • Les données ne sont JAMAIS supprimées automatiquement (pas de TTL).
+//      Seul ScrobblesFileCache.clear() ou une déconnexion vide le cache.
 //
 //  Backends :
+//    • Web                             → IndexedDB (illimité)
 //    • Natif (Android / iOS / Desktop) → fichiers via path_provider
-//    • Web                             → SharedPreferences (localStorage)
 //
 //  Structure stockage :
 //    Clé "year_YYYY" → {"v":2,"ts":…,"data":[[ts,"Track","Artist","Album"],…]}
-//    Clé "meta"      → {"ts":…,"data":{…}}
+//    Clé "meta"      → {"ts":…,"data":{"loaded_years":[…],"last_sync_ts":…}}
 //
 //  Rétrocompat :
 //    v1 (anciens fichiers, timestamps seulement) → chargés comme ScrobbleRecord
-//    sans métadonnées (track/artist/album vides). Re-téléchargement automatique
-//    déclenché par AllScrobblesService si track vide.
-//
-//  TTL :
-//    Année en cours  → 1 h
-//    Années passées  → 90 j (données immuables)
-//    Méta            → 24 h
+//    sans métadonnées (track/artist/album vides). Re-téléchargement déclenché
+//    par AllScrobblesService si track vide.
 //
 //  API publique :
 //    • init()                   — charge en mémoire au démarrage
-//    • pruneExpired()           — nettoyage non-bloquant
 //    • getRecords(year)         → List<ScrobbleRecord>?
 //    • getTimestamps(year)      → List<int>?  (dérivé des records)
 //    • isYearCached(year)       → bool
-//    • isYearComplete(year)     → bool  (records avec métadonnées)
+//    • isYearComplete(year)     → bool  (records avec track+artist)
 //    • getMeta()                → Map<String,dynamic>?
 //    • setYear(year, records)   — persiste + met à jour la mémoire
 //    • setMeta(meta)            — persiste + met à jour la mémoire
-//    • clear()                  — vide tout
+//    • clear()                  — vide tout (déconnexion)
 //    • getDiskUsageBytes()      → Future<int>
 //    • getTotalScrobbleCount()  → int
+//    • pruneExpired()           — no-op (données permanentes)
 // ══════════════════════════════════════════════════════════════════════════
 
 import 'dart:convert';
@@ -93,11 +91,7 @@ class ScrobbleRecord {
 class ScrobblesFileCache {
   ScrobblesFileCache._();
 
-  // ── TTL (ms) ──────────────────────────────────────────────────────────────
-  static const _ttlCurrentMs = 60 * 60 * 1000;           // 1 h
-  static const _ttlPastMs    = 90 * 24 * 60 * 60 * 1000; // 90 j
-  static const _ttlMetaMs    = 24 * 60 * 60 * 1000;      // 24 h
-  static const _fileVersion  = 2;
+  static const _fileVersion = 2;
 
   // ── Cache mémoire ─────────────────────────────────────────────────────────
   static final Map<int, List<ScrobbleRecord>> _years = {};
@@ -109,7 +103,8 @@ class ScrobblesFileCache {
   static const  _metaKey = 'meta';
 
   // ──────────────────────────────────────────────────────────────────────────
-  //  Init
+  //  Init — charge toutes les données en mémoire au démarrage.
+  //  Les données ne sont jamais expirées ; tout ce qui est stocké est chargé.
   // ──────────────────────────────────────────────────────────────────────────
 
   static Future<void> init() async {
@@ -117,21 +112,17 @@ class ScrobblesFileCache {
     _initialized = true;
 
     try {
-      final now = DateTime.now().millisecondsSinceEpoch;
-
-      // ── Méta ────────────────────────────────────────────────────────────────
+      // ── Méta ──────────────────────────────────────────────────────────────
       final metaRaw = await CacheBackend.read(_metaKey);
       if (metaRaw != null) {
         try {
           final decoded = jsonDecode(metaRaw) as Map<String, dynamic>;
-          final ts      = (decoded['ts'] as num?)?.toInt() ?? 0;
-          if ((now - ts) <= _ttlMetaMs) {
-            _meta = decoded['data'] as Map<String, dynamic>?;
-          }
+          // 'data' contient loaded_years + last_sync_ts
+          _meta = decoded['data'] as Map<String, dynamic>?;
         } catch (_) {}
       }
 
-      // ── Années listées dans la méta ─────────────────────────────────────────
+      // ── Années connues via la méta ─────────────────────────────────────────
       final years = _meta == null
           ? <int>[]
           : ((_meta!['loaded_years'] as List?)
@@ -144,10 +135,8 @@ class ScrobblesFileCache {
         if (raw == null) continue;
         try {
           final decoded = jsonDecode(raw) as Map<String, dynamic>;
-          final ts      = (decoded['ts'] as num?)?.toInt() ?? 0;
-          final version = (decoded['v']  as num?)?.toInt() ?? 1;
-          if ((now - ts) > _ttlOf(year)) continue;
-
+          final version = (decoded['v'] as num?)?.toInt() ?? 1;
+          // Pas de vérification TTL — les données sont permanentes
           final records = _parseRecords(decoded['data'], version);
           if (records != null) _years[year] = records;
         } catch (_) {}
@@ -161,7 +150,7 @@ class ScrobblesFileCache {
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  //  Lecture (synchrone)
+  //  Lecture (synchrone — depuis le cache mémoire)
   // ──────────────────────────────────────────────────────────────────────────
 
   /// Records complets pour [year], ou null si absent.
@@ -195,7 +184,7 @@ class ScrobblesFileCache {
   static List<int> getCachedYears() => (_years.keys.toList()..sort());
 
   // ──────────────────────────────────────────────────────────────────────────
-  //  Écriture (async)
+  //  Écriture (async — persiste dans le backend)
   // ──────────────────────────────────────────────────────────────────────────
 
   static Future<void> setYear(int year, List<ScrobbleRecord> records) async {
@@ -204,7 +193,7 @@ class ScrobblesFileCache {
       final ts      = DateTime.now().millisecondsSinceEpoch;
       final payload = jsonEncode({
         'v':    _fileVersion,
-        'ts':   ts,
+        'ts':   ts,   // date d'écriture (informatif)
         'data': records.map((r) => r.toList()).toList(),
       });
       await CacheBackend.write(_yearKey(year), payload);
@@ -230,57 +219,32 @@ class ScrobblesFileCache {
   //  Stats stockage
   // ──────────────────────────────────────────────────────────────────────────
 
-  /// Taille totale du cache en octets.
   static Future<int> getDiskUsageBytes() => CacheBackend.totalBytes();
 
   // ──────────────────────────────────────────────────────────────────────────
   //  Nettoyage
   // ──────────────────────────────────────────────────────────────────────────
 
+  /// No-op — les données scrobbles sont permanentes.
+  /// Seul [clear()] supprime les données (déconnexion explicite).
   static Future<void> pruneExpired() async {
-    try {
-      final now  = DateTime.now().millisecondsSinceEpoch;
-      final keys = await CacheBackend.listKeys();
-
-      for (final key in keys) {
-        if (key == _metaKey) continue;
-        // Clés d'années : "year_YYYY"
-        if (!key.startsWith('year_')) continue;
-        final year = int.tryParse(key.replaceFirst('year_', ''));
-        if (year == null) continue;
-
-        final raw = await CacheBackend.read(key);
-        if (raw == null) continue;
-        try {
-          final decoded = jsonDecode(raw) as Map<String, dynamic>;
-          final ts      = (decoded['ts'] as num?)?.toInt() ?? 0;
-          if ((now - ts) > _ttlOf(year)) {
-            await CacheBackend.delete(key);
-            _years.remove(year);
-            debugPrint('[ScrobblesCache] $year supprimé (expiré).');
-          }
-        } catch (_) {
-          await CacheBackend.delete(key);
-        }
-      }
-    } catch (_) {}
+    // Intentionnellement vide : pas de TTL sur l'historique.
   }
 
+  /// Vide complètement le cache (mémoire + stockage).
+  /// À appeler uniquement lors d'une déconnexion du compte.
   static Future<void> clear() async {
     _years.clear();
     _meta = null;
     _initialized = false;
     await CacheBackend.clearAll();
+    debugPrint('[ScrobblesCache] Cache vidé.');
   }
 
   // ──────────────────────────────────────────────────────────────────────────
   //  Helpers privés
   // ──────────────────────────────────────────────────────────────────────────
 
-  static int _ttlOf(int year) =>
-      year == DateTime.now().year ? _ttlCurrentMs : _ttlPastMs;
-
-  /// Parse les données selon la version du fichier.
   static List<ScrobbleRecord>? _parseRecords(dynamic data, int version) {
     if (data == null) return null;
     try {
