@@ -231,15 +231,12 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ── Open settings as a full-screen route ──────────────────────────────────
+  // ── Open settings page ────────────────────────────────────────────────────
 
   Future<void> _openSettings(BuildContext context) async {
     await Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => Scaffold(
-        appBar: AppBar(
-          title: Text(L.navSettings),
-          scrolledUnderElevation: 0,
-        ),
+        appBar: AppBar(title: Text(L.navSettings), scrolledUnderElevation: 0),
         body: _SettingsPage(username: widget.username),
       ),
     ));
@@ -257,66 +254,66 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Row(
           children: [
             // ── Side rail ─────────────────────────────────────────────────
-            NavigationRail(
-              selectedIndex:         _idx,
-              onDestinationSelected: (i) => setState(() => _idx = i),
-
-              // Extended rail (labels inline, wider) above 1200 dp.
-              extended: extended,
-
-              // When compact, show all labels below icons for clarity.
-              labelType: extended
-                  ? NavigationRailLabelType.none
-                  : NavigationRailLabelType.all,
-
-              // Enough width so labels are never clipped.
-              minWidth:         72,
-              minExtendedWidth: 200,
-
-              // Leading: full logo when extended, icon only when compact.
-              leading: extended
-                  ? Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                      child: Row(children: [
-                        Icon(Icons.equalizer_rounded,
-                            color: scheme.primary, size: 22),
-                        const SizedBox(width: 10),
-                        Text('LastStats',
-                            style: TextStyle(
-                              color:         scheme.primary,
-                              fontSize:      16,
-                              fontWeight:    FontWeight.w800,
-                              letterSpacing: 0.2,
-                            )),
-                      ]),
-                    )
-                  : Padding(
-                      padding: const EdgeInsets.only(top: 12, bottom: 4),
-                      child: Icon(Icons.equalizer_rounded,
-                          color: scheme.primary, size: 22),
+            // Wrap in Column so the settings button stays pinned at the bottom
+            SizedBox(
+              width: extended ? 200 : 72,
+              child: Column(
+                children: [
+                  Expanded(
+                    child: NavigationRail(
+                      selectedIndex:         _idx,
+                      onDestinationSelected: (i) => setState(() => _idx = i),
+                      extended: extended,
+                      labelType: extended
+                          ? NavigationRailLabelType.none
+                          : NavigationRailLabelType.all,
+                      minWidth:         72,
+                      minExtendedWidth: 200,
+                      leading: extended
+                          ? Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                              child: Row(children: [
+                                Icon(Icons.equalizer_rounded,
+                                    color: scheme.primary, size: 22),
+                                const SizedBox(width: 10),
+                                Text('LastStats',
+                                    style: TextStyle(
+                                      color:         scheme.primary,
+                                      fontSize:      16,
+                                      fontWeight:    FontWeight.w800,
+                                      letterSpacing: 0.2,
+                                    )),
+                              ]),
+                            )
+                          : Padding(
+                              padding: const EdgeInsets.only(top: 12, bottom: 4),
+                              child: Icon(Icons.equalizer_rounded,
+                                  color: scheme.primary, size: 22),
+                            ),
+                      destinations: _railDestinations,
                     ),
-
-              destinations: _railDestinations,
-
-              // Settings button pinned at the bottom of the rail
-              trailing: Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: extended
-                    ? ListTile(
-                        leading: const Icon(Icons.settings_outlined),
-                        title: Text(L.navSettings),
-                        onTap: () => _openSettings(context),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
-                        contentPadding:
-                            const EdgeInsets.symmetric(horizontal: 16),
-                      )
-                    : IconButton(
-                        icon: const Icon(Icons.settings_outlined),
-                        tooltip: L.navSettings,
-                        onPressed: () => _openSettings(context),
-                      ),
-                ),
+                  ),
+                  // Settings button pinned at the bottom
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: extended
+                        ? ListTile(
+                            leading: const Icon(Icons.settings_outlined),
+                            title: Text(L.navSettings),
+                            onTap: () => _openSettings(context),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12)),
+                            contentPadding:
+                                const EdgeInsets.symmetric(horizontal: 16),
+                          )
+                        : IconButton(
+                            icon: const Icon(Icons.settings_outlined),
+                            tooltip: L.navSettings,
+                            onPressed: () => _openSettings(context),
+                          ),
+                  ),
+                ],
+              ),
             ),
 
             // ── Separator ────────────────────────────────────────────────
