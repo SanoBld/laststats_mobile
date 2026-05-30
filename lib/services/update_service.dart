@@ -2,24 +2,24 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 // ══════════════════════════════════════════════════════════════════════════
-//  UpdateService — vérifie les nouvelles versions via GitHub Releases
+//  UpdateService — checks for new versions via GitHub Releases
 //
-//  👉 Configurez [_repo] avec votre dépôt GitHub.
-//     Les releases doivent être taguées sous la forme "v1.2.3".
+//  👉 Set [_repo] to your GitHub repository.
+//     Releases must be tagged as "v1.2.3".
 // ══════════════════════════════════════════════════════════════════════════
 
 class UpdateService {
   UpdateService._();
 
-  // ─── À adapter à votre dépôt ───────────────────────────────────────────
+  // ─── Set to your own repository ───────────────────────────────────────
   static const _repo           = 'sanobld/LastStats';        // owner/repo
-  static const currentVersion  = '2.5.0';                   // version actuelle
+  static const currentVersion  = '2.6.0';                   // current version
   // ───────────────────────────────────────────────────────────────────────
 
   static const _timeout = Duration(seconds: 10);
 
-  /// Retourne un [UpdateInfo] si une version plus récente existe,
-  /// ou `null` si l'app est à jour (ou en cas d'erreur réseau).
+  /// Returns an [UpdateInfo] if a newer version exists,
+  /// or `null` if the app is up to date (or on network error).
   static Future<UpdateInfo?> checkForUpdate() async {
     try {
       final uri = Uri.https(
@@ -39,7 +39,7 @@ class UpdateService {
       if (latest.isEmpty) return null;
       if (!_isNewer(latest, currentVersion)) return null;
 
-      // Récupère l'URL du premier asset .apk s'il existe
+      // Get the URL of the first .apk asset if it exists
       String? apkUrl;
       final assets = data['assets'] as List?;
       if (assets != null) {

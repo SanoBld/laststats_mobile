@@ -2,7 +2,7 @@ name: laststats_mobile
 description: "LastStats — Your Last.fm stats, reinvented."
 publish_to: 'none'
 
-version: 2.0.0+1
+version: 2.6.0+1
 
 environment:
   sdk: ^3.11.5
@@ -17,9 +17,9 @@ dependencies:
   path_provider: ^2.1.5
   url_launcher: ^6.3.0
   palette_generator: ^0.3.3
-  flutter_local_notifications: ^18.0.0   # Local notifications (scrobble events)
-  workmanager: ^0.6.0                    # Background tasks without the app open — v0.5.2 incompatible avec Flutter v2 embedding
-  web: ^1.1.0                            # Remplace dart:html (déprécié) pour le backend IndexedDB web
+  flutter_local_notifications: ^18.0.0   
+  workmanager: ^0.6.0                    
+  web: ^1.1.0                            
 
 dev_dependencies:
   flutter_test:
