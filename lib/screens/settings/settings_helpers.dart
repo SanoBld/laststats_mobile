@@ -162,10 +162,9 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
   @override
   void initState() {
     super.initState();
-    final h = HSLColor.fromColor(widget.initialColor);
-    _hsl = h
-        .withSaturation(h.saturation.clamp(0.4, 1.0))
-        .withLightness(h.lightness.clamp(0.3, 0.7));
+    // Load the initial color as-is — no clamping.
+    // Black, white, and any gray are all valid choices.
+    _hsl = HSLColor.fromColor(widget.initialColor);
     _hexCtrl = TextEditingController(text: colorToHex(_hsl.toColor()));
   }
 
@@ -240,10 +239,13 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
     final text   = Theme.of(context).textTheme;
     final pure   = _hsl.withSaturation(1.0).withLightness(0.5).toColor();
 
+    // Quick presets — includes black and white for monochromatic themes
     const quickPresets = [
       Color(0xFF7C3AED), Color(0xFF1D4ED8), Color(0xFF059669), Color(0xFFDC2626),
       Color(0xFFD97706), Color(0xFFDB2777), Color(0xFF0F766E), Color(0xFFEA580C),
       Color(0xFF0284C7), Color(0xFF16A34A),
+      Color(0xFF000000), // Black — produces a neutral dark theme
+      Color(0xFFFFFFFF), // White — produces a neutral light theme
     ];
 
     return AlertDialog(
@@ -278,7 +280,7 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
           _sliderRow(L.colorPickerSaturation, _hsl.saturation, 0.0, 1.0,
             [Colors.grey.shade400, pure], (v) => _hsl = _hsl.withSaturation(v)),
           const SizedBox(height: 14),
-          _sliderRow(L.colorPickerBrightness, _hsl.lightness, 0.15, 0.85,
+          _sliderRow(L.colorPickerBrightness, _hsl.lightness, 0.0, 1.0,
             [Colors.black, _hsl.withSaturation(1.0).withLightness(0.5).toColor(), Colors.white],
             (v) => _hsl = _hsl.withLightness(v)),
           const SizedBox(height: 16),

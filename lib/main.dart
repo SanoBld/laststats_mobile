@@ -32,6 +32,12 @@ void main() async {
   useNowPlayingColorNotifier.value = prefs.getBool('ls_use_nowplaying_color') ?? false;
   localeNotifier.value             = prefs.getString('ls_locale') ?? 'fr';
 
+  // Fallback accent used when music-color mode is on but nothing is playing.
+  // Defaults to the normal accent color if never set.
+  final fallbackHex = prefs.getString('ls_nowplaying_fallback_color');
+  nowPlayingFallbackColorNotifier.value =
+      fallbackHex != null ? accentFromString(fallbackHex) : accentNotifier.value;
+
   // ── Navigation layout ('auto' | 'on' | 'off') ───────────────────────────
   pcModeNotifier.value = prefs.getString('ls_pc_mode') ?? 'auto';
 
@@ -99,14 +105,15 @@ class LastStatsApp extends StatelessWidget {
                             (useDynamic && lightDynamic != null)
                                 ? lightDynamic.harmonized()
                                 : ColorScheme.fromSeed(
-                                    seedColor:  accent,
+                                    // seedColorForScheme handles pure black/white edge cases
+                                    seedColor:  seedColorForScheme(accent),
                                     brightness: Brightness.light,
                                   );
                         final ColorScheme darkScheme =
                             (useDynamic && darkDynamic != null)
                                 ? darkDynamic.harmonized()
                                 : ColorScheme.fromSeed(
-                                    seedColor:  accent,
+                                    seedColor:  seedColorForScheme(accent),
                                     brightness: Brightness.dark,
                                   );
 

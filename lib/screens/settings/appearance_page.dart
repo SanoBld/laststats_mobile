@@ -19,6 +19,8 @@ class _AppearancePageState extends State<AppearancePage> {
   String _accent             = 'purple';
   bool   _useDynamicColor    = false;
   bool   _useNowPlayingColor = false;
+  // The accent color shown when music-color mode is on but nothing is playing
+  Color  _fallbackAccent     = const Color(0xFF7C3AED);
 
   @override
   void initState() {
@@ -43,6 +45,11 @@ class _AppearancePageState extends State<AppearancePage> {
       _accent             = p.getString('ls_accent')             ?? 'purple';
       _useDynamicColor    = p.getBool('ls_use_dynamic_color')    ?? false;
       _useNowPlayingColor = p.getBool('ls_use_nowplaying_color') ?? false;
+      // Load the fallback color; default to the regular accent if never set
+      final fbHex = p.getString('ls_nowplaying_fallback_color');
+      _fallbackAccent = fbHex != null
+          ? accentFromString(fbHex)
+          : accentFromString(p.getString('ls_accent'));
     });
   }
 
@@ -64,8 +71,7 @@ class _AppearancePageState extends State<AppearancePage> {
     if (!_useDynamicColor && !_useNowPlayingColor) accentNotifier.value = color;
   }
 
-  Future<void> _pickCustomColor() async {
-    if (_useDynamicColor || _useNowPlayingColor) return;
+  Future<void> _pickCustomColor() async {    if (_useDynamicColor || _useNowPlayingColor) return;
     final result = await showDialog<Color>(
       context: context,
       builder: (_) => ColorPickerDialog(initialColor: accentNotifier.value),
@@ -74,6 +80,23 @@ class _AppearancePageState extends State<AppearancePage> {
       final hex = colorToHex(result);
       await _set('ls_accent', hex);
       setState(() => _accent = hex);
+      accentNotifier.value = result;
+    }
+  }
+
+  // Opens the picker to choose the fallback accent.
+  // This color is shown when music-color mode is ON but nothing is playing.
+  Future<void> _pickFallbackColor() async {
+    final result = await showDialog<Color>(
+      context: context,
+      builder: (_) => ColorPickerDialog(initialColor: _fallbackAccent),
+    );
+    if (result != null && mounted) {
+      final hex = colorToHex(result);
+      await _set('ls_nowplaying_fallback_color', hex);
+      setState(() => _fallbackAccent = result);
+      nowPlayingFallbackColorNotifier.value = result;
+      // Apply right away so the user sees the change if no track is playing
       accentNotifier.value = result;
     }
   }
@@ -304,6 +327,70 @@ class _AppearancePageState extends State<AppearancePage> {
                 style: text.bodySmall
                     ?.copyWith(color: scheme.onSurfaceVariant)),
           ),
+
+          // Fallback color: shown when music-color mode is ON but nothing plays.
+          // Only visible when the toggle above is active.
+          if (_useNowPlayingColor && !_useDynamicColor) ...[
+            const Divider(height: 1, indent: 16, endIndent: 16),
+            ListTile(
+              leading: Icon(Icons.music_off_rounded, color: scheme.primary),
+              title: Text(
+                localeNotifier.value == 'en'
+                    ? 'Color when nothing plays'
+                    : 'Couleur quand rien ne joue',
+              ),
+              subtitle: Text(
+                localeNotifier.value == 'en'
+                    ? 'Accent used while no track is scrobbling'
+                    : "Accent utilisé quand aucune piste n'est en cours",
+                style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+              ),
+              trailing: GestureDetector(
+                onTap: _pickFallbackColor,
+                child: Tooltip(
+                  message: localeNotifier.value == 'en'
+                      ? 'Pick fallback color'
+                      : 'Choisir la couleur de secours',
+                  child: Container(
+                    width: 32, height: 32,
+                    decoration: BoxDecoration(
+                      color: _fallbackAccent,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: scheme.outlineVariant, width: 2),
+                    ),
+                  ),
+                ),
+              ),
+              onTap: _pickFallbackColor,
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(56, 0, 16, 10),
+              child: Row(children: [
+                // Small swatch showing the current fallback color
+                Container(
+                  width: 14, height: 14,
+                  decoration: BoxDecoration(
+                    color: _fallbackAccent,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: scheme.outlineVariant),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  colorToHex(_fallbackAccent),
+                  style: text.bodySmall?.copyWith(
+                    fontFamily: 'monospace',
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                TextButton(
+                  onPressed: _pickFallbackColor,
+                  child: Text(L.settingsCustomColorEdit),
+                ),
+              ]),
+            ),
+          ],
         ]),
 
         const SizedBox(height: 16),
