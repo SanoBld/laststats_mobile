@@ -231,6 +231,20 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // ── Open settings as a full-screen route ──────────────────────────────────
+
+  Future<void> _openSettings(BuildContext context) async {
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => Scaffold(
+        appBar: AppBar(
+          title: Text(L.navSettings),
+          scrolledUnderElevation: 0,
+        ),
+        body: _SettingsPage(username: widget.username),
+      ),
+    ));
+  }
+
   // ── Wide layout (side NavigationRail) ──────────────────────────────────────
 
   Widget _buildWideLayout(BuildContext context, List<Widget> pages) {
@@ -283,6 +297,26 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
 
               destinations: _railDestinations,
+
+              // Settings button pinned at the bottom of the rail
+              trailing: Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: extended
+                    ? ListTile(
+                        leading: const Icon(Icons.settings_outlined),
+                        title: Text(L.navSettings),
+                        onTap: () => _openSettings(context),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        contentPadding:
+                            const EdgeInsets.symmetric(horizontal: 16),
+                      )
+                    : IconButton(
+                        icon: const Icon(Icons.settings_outlined),
+                        tooltip: L.navSettings,
+                        onPressed: () => _openSettings(context),
+                      ),
+                ),
             ),
 
             // ── Separator ────────────────────────────────────────────────

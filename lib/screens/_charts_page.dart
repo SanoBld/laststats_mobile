@@ -10,8 +10,8 @@ List<String> get _chartWeekdayLabels => localeNotifier.value == 'en'
 const _kTwoPi  = 6.283185307179586;
 const _kHalfPi = 1.5707963267948966;
 
-/// Nombre exact pour les barres (jusqu'à 999 999, puis M).
-/// Contrairement à _fmt qui abrège dès 1 000.
+/// Exact number for bars (up to 999 999, then M).
+/// Unlike _fmt which abbreviates from 1 000.
 String _fmtExact(int n) {
   if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
   return n.toString();
@@ -30,13 +30,13 @@ class _ChartsPage extends StatefulWidget {
 class _ChartsPageState extends State<_ChartsPage>
     with AutomaticKeepAliveClientMixin {
 
-  // ── Données globales (tops all-time) ─────────────────────────────────────
+  // ── Global data (all-time tops) ──────────────────────────────────────────
   List<dynamic> _topArtists = [];
   List<dynamic> _topAlbums  = [];
   bool   _loading = true;
   String? _error;
 
-  // ── Données liées à l'année sélectionnée ─────────────────────────────────
+  // ── Data for the selected year ───────────────────────────────────────────
   Map<String, int>? _monthly;
   bool _hourlyLoading    = false;
   Map<int, int>?    _hourlyData;
@@ -44,13 +44,13 @@ class _ChartsPageState extends State<_ChartsPage>
   int  _hourlyCount      = 0;
   bool _calendarLoading  = false;
   Map<String, int>? _calendarData;
-  bool _hasFullYearData  = false; // true = données depuis AllScrobblesService
+  bool _hasFullYearData  = false; // true = data loaded from AllScrobblesService
 
-  // ── Genres (dérivé des tops artistes, all-time) ───────────────────────────
+  // ── Genres (derived from all-time top artists) ────────────────────────────
   bool _tagsLoading = false;
   List<_TagEntry> _tags = [];
 
-  // ── Sélection d'année ─────────────────────────────────────────────────────
+  // ── Year selection ────────────────────────────────────────────────────────
   int        _selectedYear  = DateTime.now().year;
   List<int>  _availableYears = [DateTime.now().year];
 
@@ -86,11 +86,11 @@ class _ChartsPageState extends State<_ChartsPage>
     final p = AllScrobblesService.progressNotifier.value;
     setState(() => _historyProgress = p);
 
-    // Actualiser les années disponibles dès qu'une nouvelle est chargée
+    // Refresh available years whenever a new one is loaded
     _refreshAvailableYears();
 
-    // Recharger dès que les données complètes de l'année arrivent,
-    // même si on avait déjà du contenu via le fallback (page 1 incomplet)
+    // Reload when full year data arrives,
+    // even if we already had partial data from the fallback (page 1 only)
     if (!_hasFullYearData && AllScrobblesService.isYearCached(_selectedYear)) {
       _hasFullYearData = true;
       _loadYearData(_selectedYear);
@@ -118,13 +118,13 @@ class _ChartsPageState extends State<_ChartsPage>
       _refreshAvailableYears();
       _loadTags();
 
-      // Initialiser le flag avant de charger (évite un double-chargement inutile)
+      // Set the flag before loading to avoid a double-load
       _hasFullYearData = AllScrobblesService.isYearCached(_selectedYear);
 
-      // Charger les données de l'année sélectionnée
+      // Load data for the selected year
       await _loadYearData(_selectedYear);
 
-      // Démarrer le chargement de l'historique complet si pas encore lancé
+      // Start loading full history if not already running
       if (!AllScrobblesService.isRunning) {
         AllScrobblesService.loadAll(widget.service);
       }
@@ -138,10 +138,10 @@ class _ChartsPageState extends State<_ChartsPage>
     }
   }
 
-  // ── Chargement des données d'une année ────────────────────────────────────
+  // ── Load year data ────────────────────────────────────────────────────────
 
   Future<void> _loadYearData(int year) async {
-    // Priorité 1 : cache AllScrobbles (instantané)
+    // Priority 1: AllScrobbles cache (instant)
     final records = AllScrobblesService.getRecordsForYear(year);
     if (records != null) {
       if (!mounted) return;
@@ -157,7 +157,7 @@ class _ChartsPageState extends State<_ChartsPage>
       return;
     }
 
-    // Priorité 2 : fallback API (seulement utile pour l'année en cours)
+    // Priority 2: API fallback (only useful for the current year)
     await Future.wait([
       _loadMonthlyFallback(),
       _loadHourlyFallback(),
@@ -171,7 +171,7 @@ class _ChartsPageState extends State<_ChartsPage>
     try {
       final data = await widget.service.getMonthlyScrobbles(months: 24);
       if (!mounted) return;
-      // Filtrer sur l'année sélectionnée si possible
+      // Filter to the selected year if possible
       final filtered = Map.fromEntries(
         data.entries.where((e) => e.key.startsWith('$_selectedYear')),
       );
@@ -226,7 +226,7 @@ class _ChartsPageState extends State<_ChartsPage>
   }
 
   Future<void> _loadCalendarFallback(int year) async {
-    // Le fallback API n'est pertinent que pour l'année en cours
+    // API fallback is only relevant for the current year
     if (year != DateTime.now().year) {
       if (mounted) setState(() => _calendarLoading = false);
       return;
@@ -302,21 +302,21 @@ class _ChartsPageState extends State<_ChartsPage>
     }
   }
 
-  // ── Années disponibles ────────────────────────────────────────────────────
+  // ── Available years ───────────────────────────────────────────────────────
 
   void _refreshAvailableYears() {
     if (!mounted) return;
     final cached      = AllScrobblesService.getCachedYears().toSet();
     final currentYear = DateTime.now().year;
-    cached.add(currentYear); // l'année en cours est toujours accessible (fallback)
+    cached.add(currentYear); // current year is always available (fallback)
     final sorted = cached.toList()..sort();
     setState(() => _availableYears = sorted);
   }
 
   // ── Helpers all-time ─────────────────────────────────────────────────────
 
-  /// Combine TOUS les timestamps disponibles en données mensuelles.
-  /// Retombe sur _monthly (fallback API) si aucune année n'est encore en cache.
+  /// Combines all available timestamps into monthly data.
+  /// Falls back to _monthly (API fallback) if no year is cached yet.
   Map<String, int> _buildAllTimeMonthly() {
     final result = <String, int>{};
     for (final year in _availableYears) {
@@ -330,7 +330,7 @@ class _ChartsPageState extends State<_ChartsPage>
     return result;
   }
 
-  /// Cumulative all-time, coupée au mois courant (pas de mois futurs vides).
+  /// Cumulative all-time data, cut at the current month (no empty future months).
   Map<String, int> _buildAllTimeCumulative(Map<String, int> monthly) {
     final now    = DateTime.now();
     final cutoff = '${now.year}-${now.month.toString().padLeft(2, '0')}';
@@ -351,7 +351,7 @@ class _ChartsPageState extends State<_ChartsPage>
     setState(() {
       _selectedYear    = year;
       _hasFullYearData = AllScrobblesService.isYearCached(year);
-      // _monthly (fallback) n'est pas réinitialisé : il alimente _buildAllTimeMonthly
+      // _monthly (fallback) is not reset: it feeds _buildAllTimeMonthly
       _hourlyData      = null;
       _weekdayData     = null;
       _calendarData    = null;
@@ -471,7 +471,7 @@ class _ChartsPageState extends State<_ChartsPage>
       );
     }
 
-    // Pas encore démarré (idle)
+    // Not started yet (idle)
     if (p.isIdle) {
       return Container(
         margin: const EdgeInsets.only(bottom: 16),
@@ -526,11 +526,11 @@ class _ChartsPageState extends State<_ChartsPage>
     if (_loading)       return const Center(child: CircularProgressIndicator());
     if (_error != null) return _ErrorView(message: _error!, onRetry: _load);
 
-    // ── Données all-time (barres + courbe) ───────────────────────────────────
+    // ── All-time data (bars + curve) ─────────────────────────────────────────
     final allTimeMonthly = _buildAllTimeMonthly();
     final cumulData      = _buildAllTimeCumulative(allTimeMonthly);
 
-    // ── Source des habitudes d'écoute (année sélectionnée) ──────────────────
+    // ── Listening habits source (selected year) ──────────────────────────────
     final cachedTs    = AllScrobblesService.getTimestampsForYear(_selectedYear);
     final hasFullData = cachedTs != null;
     final habitsSubtitle = hasFullData
@@ -574,7 +574,7 @@ class _ChartsPageState extends State<_ChartsPage>
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 40),
               children: [
 
-                // ── Bannière chargement historique ──────────────────────────
+                // ── History loading banner ───────────────────────────────────
                 _buildHistoryBanner(context),
 
           // ── 1. Barres mensuelles (all-time, scroll depuis le 1er scrobble) ──
@@ -583,7 +583,7 @@ class _ChartsPageState extends State<_ChartsPage>
           if (allTimeMonthly.isNotEmpty) _MonthlyCard(monthly: allTimeMonthly),
           const SizedBox(height: 24),
 
-          // ── 2. Courbe cumulative (all-time, coupée au mois courant) ────────
+          // ── 2. Cumulative curve (all-time, up to current month) ────────────
           if (cumulData.length >= 2) ...[
             _SectionHeader(
               title: _ct(
@@ -618,7 +618,7 @@ class _ChartsPageState extends State<_ChartsPage>
             _TagsCard(tags: _tags),
           const SizedBox(height: 24),
 
-          // ── 4. Habitudes d'écoute ─────────────────────────────────────────
+          // ── 4. Listening habits ───────────────────────────────────────────
           _SectionHeader(
             title: _ct("Habitudes d'écoute", 'Listening habits'),
             icon: Icons.access_time_rounded,
@@ -742,24 +742,14 @@ class _ChartsPageState extends State<_ChartsPage>
 //  Shared helpers
 // ══════════════════════════════════════════════════════════════════════════
 
-/// Card decoration commune : surface M3, bord léger.
+/// Shared card decoration: M3 surface, light border.
 BoxDecoration _chartCardDecoration(ColorScheme s) => BoxDecoration(
   color: s.surfaceContainerLow,
   borderRadius: BorderRadius.circular(16),
   border: Border.all(color: s.outlineVariant.withValues(alpha: 0.50), width: 1),
 );
 
-Widget _scrollHint(BuildContext context) {
-  final s = Theme.of(context).colorScheme;
-  final t = Theme.of(context).textTheme;
-  return Center(
-    child: Text(
-      _ct('← glisser pour naviguer', '← swipe to navigate'),
-      style: t.labelSmall?.copyWith(
-          fontSize: 9, color: s.onSurfaceVariant.withValues(alpha: 0.5)),
-    ),
-  );
-}
+
 
 /// Palette M3 : interpole entre [base] et [second] puis HSL pour les suivants.
 List<Color> _buildPalette(Color base, Color second, int count) {
@@ -914,8 +904,6 @@ class _MonthlyCardState extends State<_MonthlyCard> {
               ),
             ),
           ]),
-          const SizedBox(height: 6),
-          _scrollHint(context),
         ],
       ),
     );
@@ -1062,8 +1050,6 @@ class _CumulativeLineCardState extends State<_CumulativeLineCard> {
               ),
             ),
           ]),
-          const SizedBox(height: 6),
-          _scrollHint(context),
         ],
       ),
     );
@@ -1108,7 +1094,7 @@ class _LinePainter extends CustomPainter {
       h - (values[i] / maxVal) * h * 0.88,
     ));
 
-    // ── Remplissage dégradé ───────────────────────────────────────────────
+    // ── Gradient fill ────────────────────────────────────────────────────
     final fill = Path()
       ..moveTo(pts[0].dx, h)
       ..lineTo(pts[0].dx, pts[0].dy);
@@ -1225,7 +1211,7 @@ class _TagsCard extends StatelessWidget {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-//  _HourlyBarCard — répartition horaire
+//  _HourlyBarCard — hourly distribution
 // ══════════════════════════════════════════════════════════════════════════
 
 class _HourlyBarCard extends StatefulWidget {
@@ -1435,8 +1421,6 @@ class _HourlyBarCardState extends State<_HourlyBarCard> {
               ),
             ),
           ]),
-          const SizedBox(height: 6),
-          _scrollHint(context),
         ],
       ),
     );
@@ -1659,7 +1643,7 @@ class _DonutPainter extends CustomPainter {
 class _CalendarCard extends StatefulWidget {
   final Map<String, int> data;
   final int  year;
-  final bool fullYear; // true = données complètes depuis AllScrobblesService
+  final bool fullYear; // true = full data loaded from AllScrobblesService
   const _CalendarCard({
     required this.data,
     required this.year,
@@ -1678,7 +1662,7 @@ class _CalendarCardState extends State<_CalendarCard> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_sc.hasClients) {
-        // Pour l'année en cours → scroller à la fin ; pour le passé → début
+        // Current year → scroll to end; past year → scroll to start
         final isCurrentYear = widget.year == DateTime.now().year;
         if (isCurrentYear) {
           _sc.jumpTo(_sc.position.maxScrollExtent);
@@ -1695,7 +1679,7 @@ class _CalendarCardState extends State<_CalendarCard> {
     final s   = Theme.of(context).colorScheme;
     final t   = Theme.of(context).textTheme;
 
-    // Toujours afficher les 12 mois de l'année sélectionnée
+    // Always show all 12 months of the selected year
     final months = List.generate(
         12, (i) => DateTime(widget.year, i + 1, 1));
 
@@ -1748,7 +1732,6 @@ class _CalendarCardState extends State<_CalendarCard> {
           ),
           const SizedBox(height: 8),
           Row(children: [
-            _scrollHint(context),
             const Spacer(),
             Text(_ct('Moins', 'Less'),
                 style: t.labelSmall?.copyWith(fontSize: 9, color: s.onSurfaceVariant)),
@@ -2245,17 +2228,10 @@ class _SwipeDistributionCardState extends State<_SwipeDistributionCard> {
           ),
         ),
         const SizedBox(height: 10),
-        // Dots + swipe hint
+        // Page dots
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(
-              _ct('← glisser', '← swipe'),
-              style: t.labelSmall?.copyWith(
-                  fontSize: 9,
-                  color: s.onSurfaceVariant.withValues(alpha: 0.4)),
-            ),
-            const SizedBox(width: 10),
             ...List.generate(2, (i) => AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               width:  _page == i ? 16 : 6,
@@ -2266,13 +2242,6 @@ class _SwipeDistributionCardState extends State<_SwipeDistributionCard> {
                 borderRadius: BorderRadius.circular(3),
               ),
             )),
-            const SizedBox(width: 10),
-            Text(
-              _ct('glisser →', 'swipe →'),
-              style: t.labelSmall?.copyWith(
-                  fontSize: 9,
-                  color: s.onSurfaceVariant.withValues(alpha: 0.4)),
-            ),
           ],
         ),
       ],
@@ -2400,7 +2369,6 @@ class _YearFullHeatmapCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Row(children: [
-            _scrollHint(context),
             const Spacer(),
             Text(_ct('Moins', 'Less'),
                 style: t.labelSmall?.copyWith(
